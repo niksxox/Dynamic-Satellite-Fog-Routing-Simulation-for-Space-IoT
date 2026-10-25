@@ -1,0 +1,12 @@
+difference_multi_factor_minus_baseline,metric,scenario,seed
+0.0,mean_latency_ms,stable_topology,7
+0.0,pdr,stable_topology,7
+0.0,effective_throughput_mbps,stable_topology,7
+0,reroutes,stable_topology,7
+0.0,packet_loss_rate,stable_topology,7
+0.0,drop_rate,stable_topology,7
+0.0,timeout_rate,stable_topology,7
+0,mean_hop_count,stable_topology,7
+0.0,mean_fog_utilization,stable_topology,7
+0.0,mean_fog_queue_delay_ms,stable_topology,7
+-0.0006099999882280827,wall_clock_runtime_s,stable_topology,7

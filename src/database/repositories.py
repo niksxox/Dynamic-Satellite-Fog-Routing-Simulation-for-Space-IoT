@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from src.database.engine import Database, create_database
 from src.database.models import (FogNodeConfig, IoTDeviceConfig, LinkConfig, MetricSnapshot,
     NetworkNode, PacketRecord, RouteRecord, SatelliteConfig, SimulationEventRecord,
-    SimulationRun)
+    SimulationRun, ExperimentRecord, ExperimentRunRecord)
 from src.database.session import session_scope
 
 
@@ -45,6 +45,27 @@ class PostgresSimulationRepository:
 
     def close(self):
         self.database.dispose()
+
+    def create_experiment(self, experiment_id, configuration):
+        with session_scope(self.database.session_factory) as s:
+            if s.get(ExperimentRecord, experiment_id) is not None:
+                raise DuplicateRunError(f"experiment_id {experiment_id!r} already exists")
+            s.add(ExperimentRecord(experiment_id=experiment_id, configuration=_json(configuration)))
+
+    def record_experiment_run(self, experiment_id, row):
+        with session_scope(self.database.session_factory) as s:
+            s.add(ExperimentRunRecord(experiment_id=experiment_id, run_id=row["run_id"],
+                scenario=row["scenario"], algorithm=row["algorithm"], seed=row["seed"],
+                status=row["status"], configuration=_json(row["configuration"]),
+                metrics=_json(row.get("metrics")), error=row.get("error")))
+
+    def finish_experiment(self, experiment_id, status, duration_s):
+        with session_scope(self.database.session_factory) as s:
+            record = s.get(ExperimentRecord, experiment_id)
+            if record is not None:
+                record.status = status
+                record.ended_at = datetime.now(timezone.utc)
+                record.wall_clock_duration_s = duration_s
 
     def create_run(self, run_id, config, algorithm, seed, duration_s, model_version="phase-4"):
         with session_scope(self.database.session_factory) as s:

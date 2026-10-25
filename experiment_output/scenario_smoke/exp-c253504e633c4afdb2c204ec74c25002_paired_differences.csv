@@ -1,0 +1,12 @@
+difference_multi_factor_minus_baseline,metric,scenario,seed
+0.0,mean_latency_ms,fog_node_overload,7
+0.0,pdr,fog_node_overload,7
+0.0,effective_throughput_mbps,fog_node_overload,7
+0,reroutes,fog_node_overload,7
+0.0,packet_loss_rate,fog_node_overload,7
+0.0,drop_rate,fog_node_overload,7
+0.0,timeout_rate,fog_node_overload,7
+0,mean_hop_count,fog_node_overload,7
+0.0,mean_fog_utilization,fog_node_overload,7
+0.0,mean_fog_queue_delay_ms,fog_node_overload,7
+-0.003451600088737905,wall_clock_runtime_s,fog_node_overload,7

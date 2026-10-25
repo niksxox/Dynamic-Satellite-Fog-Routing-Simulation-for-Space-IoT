@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import random
 import time
+import hashlib
 from collections import defaultdict
 from typing import Generator
 
@@ -119,7 +120,7 @@ class SimulationEngine:
         self._decisions: list[RoutingDecision] = []
         self._link_resources: dict[tuple[object, ...], simpy.Resource] = {}
         self._fog_resources: dict[str, simpy.Resource] = {}
-        self._rng = random.Random(config.seed)
+        self._packet_link_attempts: dict[tuple[str, tuple[str, str]], int] = defaultdict(int)
         self._link_stats: dict[str, dict[str, float]] = defaultdict(
             lambda: {"transmissions": 0, "delivered_frames": 0, "lost_frames": 0,
                      "bytes": 0, "serialization_s": 0.0}
@@ -358,7 +359,15 @@ class SimulationEngine:
                     self._finish(packet, PacketState.DROPPED,
                                  f"receiving node {next_node} failed in flight")
                     return
-                if self._rng.random() < float(data.get("packet_loss_probability", 0.0)):
+                link_key = _link_key(current, next_node)
+                draw_key = (packet.packet_id, link_key)
+                attempt = self._packet_link_attempts[draw_key]
+                self._packet_link_attempts[draw_key] += 1
+                draw_seed = hashlib.sha256(
+                    f"{self.config.seed}:{packet.packet_id}:{link_key}:{attempt}".encode()
+                ).digest()
+                loss_draw = random.Random(int.from_bytes(draw_seed[:8], "big")).random()
+                if loss_draw < float(data.get("packet_loss_probability", 0.0)):
                     stats["lost_frames"] += 1
                     self._record("packet_loss", source=current, target=next_node,
                                  packet_id=packet.packet_id, description="Frame lost on link")

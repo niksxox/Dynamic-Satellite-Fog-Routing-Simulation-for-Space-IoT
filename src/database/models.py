@@ -186,3 +186,27 @@ class MetricSnapshot(Base):
     fog_statistics: Mapped[dict] = mapped_column(JSON, nullable=False)
     __table_args__ = (UniqueConstraint("run_id", "timestamp_s", name="uq_metric_run_time"),
                       Index("ix_metrics_run_time", "run_id", "timestamp_s"))
+
+
+class ExperimentRecord(Base):
+    __tablename__ = "experiments"
+    experiment_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    configuration: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    wall_clock_duration_s: Mapped[float | None] = mapped_column(Float)
+
+
+class ExperimentRunRecord(Base):
+    __tablename__ = "experiment_runs"
+    experiment_id: Mapped[str] = mapped_column(ForeignKey("experiments.experiment_id", ondelete="CASCADE"), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.run_id", ondelete="SET NULL"), primary_key=True)
+    scenario: Mapped[str] = mapped_column(String(80), nullable=False)
+    algorithm: Mapped[str] = mapped_column(String(64), nullable=False)
+    seed: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    configuration: Mapped[dict] = mapped_column(JSON, nullable=False)
+    metrics: Mapped[dict | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (Index("ix_experiment_runs_scenario_algo", "scenario", "algorithm", "seed"),)

@@ -1,0 +1,12 @@
+difference_multi_factor_minus_baseline,metric,scenario,seed
+0.0,mean_latency_ms,multiple_simultaneous_failures,7
+0.0,pdr,multiple_simultaneous_failures,7
+0.0,effective_throughput_mbps,multiple_simultaneous_failures,7
+0,reroutes,multiple_simultaneous_failures,7
+0.0,packet_loss_rate,multiple_simultaneous_failures,7
+0.0,drop_rate,multiple_simultaneous_failures,7
+0.0,timeout_rate,multiple_simultaneous_failures,7
+0,mean_hop_count,multiple_simultaneous_failures,7
+0.0,mean_fog_utilization,multiple_simultaneous_failures,7
+0.0,mean_fog_queue_delay_ms,multiple_simultaneous_failures,7
+-0.0016168000875040889,wall_clock_runtime_s,multiple_simultaneous_failures,7
