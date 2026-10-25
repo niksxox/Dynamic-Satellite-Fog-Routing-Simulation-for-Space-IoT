@@ -164,9 +164,19 @@ class PostgresSimulationRepository:
 
     def list_runs(self, limit=100):
         with session_scope(self.database.session_factory) as s:
+            rows = s.execute(select(SimulationRun, MetricSnapshot).outerjoin(
+                MetricSnapshot, MetricSnapshot.run_id == SimulationRun.run_id).order_by(
+                    SimulationRun.created_at.desc()).limit(limit)).all()
             return [dict(run_id=r.run_id, status=r.status, algorithm=r.routing_algorithm,
-                         seed=r.random_seed, duration_s=r.duration_s, configuration=r.configuration)
-                    for r in s.scalars(select(SimulationRun).order_by(SimulationRun.created_at.desc()).limit(limit))]
+                         seed=r.random_seed, duration_s=r.duration_s, configuration=r.configuration,
+                         generated=None if m is None else m.generated,
+                         delivered=None if m is None else m.delivered,
+                         dropped=None if m is None else m.dropped,
+                         timed_out=None if m is None else m.timed_out,
+                         pending=None if m is None else m.pending,
+                         pdr=None if m is None else m.pdr,
+                         mean_latency_ms=None if m is None or m.mean_latency_s is None else m.mean_latency_s * 1000)
+                    for r, m in rows]
 
     def get_run_summary(self, run_id):
         with session_scope(self.database.session_factory) as s:
@@ -193,6 +203,46 @@ class PostgresSimulationRepository:
         with session_scope(self.database.session_factory) as s:
             return list(s.scalars(select(MetricSnapshot).where(
                 MetricSnapshot.run_id == run_id).order_by(MetricSnapshot.timestamp_s)))
+
+    def get_network_configuration(self, run_id):
+        with session_scope(self.database.session_factory) as s:
+            nodes = list(s.scalars(select(NetworkNode).where(NetworkNode.run_id == run_id)))
+            links = list(s.scalars(select(LinkConfig).where(LinkConfig.run_id == run_id)))
+            return {"nodes": [{"node_id": n.node_id, "node_type": n.node_type,
+                    "configuration": n.configuration} for n in nodes],
+                "links": [{"source": l.source, "target": l.target,
+                    "link_type": l.link_type, "bandwidth_mbps": l.bandwidth_mbps,
+                    "packet_loss_probability": l.packet_loss_probability,
+                    "operational": l.operational, "configuration": l.configuration} for l in links]}
+
+    def get_packet_history(self, run_id):
+        with session_scope(self.database.session_factory) as s:
+            return list(s.scalars(select(PacketRecord).where(PacketRecord.run_id == run_id)
+                                  .order_by(PacketRecord.generated_at_s)))
+
+    def list_experiments(self, limit=100):
+        with session_scope(self.database.session_factory) as s:
+            records = s.scalars(select(ExperimentRecord).order_by(
+                ExperimentRecord.created_at.desc()).limit(limit))
+            return [{"experiment_id": r.experiment_id, "status": r.status,
+                "configuration": r.configuration, "created_at": r.created_at,
+                "wall_clock_duration_s": r.wall_clock_duration_s} for r in records]
+
+    def get_experiment_detail(self, experiment_id):
+        with session_scope(self.database.session_factory) as s:
+            experiment = s.get(ExperimentRecord, experiment_id)
+            if experiment is None: return None
+            runs = s.scalars(select(ExperimentRunRecord).where(
+                ExperimentRunRecord.experiment_id == experiment_id).order_by(
+                    ExperimentRunRecord.scenario, ExperimentRunRecord.algorithm,
+                    ExperimentRunRecord.seed))
+            return {"experiment_id": experiment.experiment_id, "status": experiment.status,
+                "configuration": experiment.configuration,
+                "wall_clock_duration_s": experiment.wall_clock_duration_s,
+                "rows": [{"experiment_id": r.experiment_id, "run_id": r.run_id,
+                    "scenario": r.scenario, "algorithm": r.algorithm, "seed": r.seed,
+                    "status": r.status, "configuration": r.configuration,
+                    "metrics": r.metrics, "error": r.error} for r in runs]}
 
 
 class InMemorySimulationRepository:
@@ -222,6 +272,10 @@ class InMemorySimulationRepository:
     def get_route_history(self, run_id, packet_id): return [d for d in self.runs[run_id]["routes"] if d.packet_id == packet_id]
     def get_event_timeline(self, run_id): return self.runs[run_id]["events"]
     def get_metrics(self, run_id): return self.runs[run_id]["metrics"]
+    def get_network_configuration(self, run_id): return {"nodes": self.runs[run_id]["nodes"], "links": self.runs[run_id]["links"]}
+    def get_packet_history(self, run_id): return self.runs[run_id]["packets"]
+    def list_experiments(self, limit=100): return []
+    def get_experiment_detail(self, experiment_id): return None
 
 
 def create_repository(backend="auto"):

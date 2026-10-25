@@ -123,6 +123,21 @@ The generated actual demonstration run is in `experiment_output/exp-f8a13bdd78b7
 
 Charts are made only from actual completed run metrics. This command evaluates one traffic intensity and one network size at a time; cross-intensity and cross-size sweep charts are not generated from a single experiment. Repeat with different settings and combine exports for such analyses. Per-run results are held in memory until export; do not request very large sweeps in one process.
 
+### Phase 6: interactive dashboard
+
+Install the pinned requirements and launch the Streamlit app from the repository root:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
+```
+
+The sidebar selects Overview, Network Explorer, Simulation Lab, Performance Analytics, Failure Replay, or Experiment History, and separately selects **Local session** or **PostgreSQL** storage. The lab calls the real scenario builders and `SimulationEngine`; paired runs call `ExperimentRunner`. It exposes seed, virtual duration, satellite count, traffic intensity, scenario, and routing mode. Local run traces are temporary to the Streamlit process/session; local experiment records can be reloaded from `experiment_output/`. PostgreSQL mode needs a reachable database configured through `DATABASE_URL`; it initializes missing tables additively and uses the persistence repository. Missing configuration or connection errors are shown without displaying credentials.
+
+The explorer draws nodes and links from captured simulation/database configuration and can highlight an actual packet path. Failure Replay orders emitted events by virtual time, highlights the affected resource, and displays packet route decisions. Analytics uses saved experiment rows and the existing aggregation/paired-difference methods, filters compatible completed pairs, reports failed runs and sample counts, and leaves undefined metrics blank. Experiment History can download JSON and per-run CSV and retrieve persisted packet/route history when PostgreSQL was used.
+
+The current simulator does not record timestamped positions or full topology snapshots at every virtual-time step. The dashboard therefore presents the last captured topology plus the chronological event/path records; it does not claim to animate a historically accurate satellite constellation. Local experiment exports retain metrics/configuration, while full packet traces are session-only unless PostgreSQL persistence is enabled. The orbit remains a deterministic circular XY approximation. For tests, run `python -m pytest -q`; the Streamlit startup and lab flow are covered by `AppTest`.
+
 ## Model limitations and remaining phases
 
-Satellite motion is a deterministic circular projection, not a validated orbit or geographic line-of-sight model. The graph updates at configured intervals. Shared link resources limit serialization but do not model a lower-layer retransmission protocol. Packet loss drops the packet without retransmission. Fog overload currently marks the fog node unavailable; it does not dynamically reduce its service rate. Multi-factor weights normalize against the current usable edge set, so route costs are relative to that snapshot. Phase 3 does not emit periodic position, queue-length, or utilization snapshots, so Phase 4 persists initial node configuration, observed topology events, and final fog statistics; it cannot reconstruct unsampled positions. The Streamlit dashboard remains future work.
+Satellite motion is a deterministic circular projection, not a validated orbit or geographic line-of-sight model. The graph updates at configured intervals. Shared link resources limit serialization but do not model a lower-layer retransmission protocol. Packet loss drops the packet without retransmission. Fog overload currently marks the fog node unavailable; it does not dynamically reduce its service rate. Multi-factor weights normalize against the current usable edge set, so route costs are relative to that snapshot. Phase 3 does not emit periodic position, queue-length, or utilization snapshots, so Phase 4 persists initial node configuration, observed topology events, and final fog statistics; it cannot reconstruct unsampled positions.
