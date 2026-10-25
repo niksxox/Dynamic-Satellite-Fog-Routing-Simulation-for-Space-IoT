@@ -11,6 +11,11 @@ satellite_bandwidth_mbps: 100
 terrestrial_bandwidth_mbps: 1000
 max_packet_retries: 3
 packet_timeout_s: 30
+route_computation_delay_ms: 1
+half_duplex_links: false
+fog_default_servers: 1
+max_generated_packets: 100000
+max_event_records: 250000
 weights:
   latency: 0.45
   bandwidth: 0.20

@@ -35,6 +35,13 @@ class SimulationConfig:
     terrestrial_bandwidth_mbps: float = 1000.0
     max_packet_retries: int = 3
     packet_timeout_s: float = 30.0
+    route_computation_delay_ms: float = 1.0
+    # False gives each direction an independent link resource (full duplex).
+    # True makes both directions contend for the same serialization resource.
+    half_duplex_links: bool = False
+    fog_default_servers: int = 1
+    max_generated_packets: int = 100_000
+    max_event_records: int = 250_000
     weights: RoutingWeights = field(default_factory=RoutingWeights)
 
     def __post_init__(self) -> None:
@@ -47,3 +54,9 @@ class SimulationConfig:
             raise ValueError("durations, ranges, and bandwidths must be positive")
         if self.max_packet_retries < 0:
             raise ValueError("max_packet_retries must be nonnegative")
+        if self.route_computation_delay_ms < 0:
+            raise ValueError("route_computation_delay_ms must be nonnegative")
+        if self.fog_default_servers < 1:
+            raise ValueError("fog_default_servers must be at least 1")
+        if self.max_generated_packets < 1 or self.max_event_records < 1:
+            raise ValueError("simulation record limits must be positive")

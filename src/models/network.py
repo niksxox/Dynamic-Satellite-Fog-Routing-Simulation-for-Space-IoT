@@ -20,6 +20,8 @@ class PacketState(str, Enum):
     DELIVERED = "delivered"
     DROPPED = "dropped"
     TIMED_OUT = "timed_out"
+    # A censored observation at the simulation horizon, distinct from a drop.
+    PENDING = "pending"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +67,12 @@ class Node:
             raise ValueError("communication_range_km must be positive")
         if self.orbital_period_s is not None and self.orbital_period_s <= 0:
             raise ValueError("orbital_period_s must be positive")
+        if self.processing_capacity_pps is not None and self.processing_capacity_pps <= 0:
+            raise ValueError("processing_capacity_pps must be positive when provided")
+        if self.processing_delay_ms < 0 or self.queue_length < 0:
+            raise ValueError("processing delay and queue length must be nonnegative")
+        if not 0.0 <= self.utilization <= 1.0:
+            raise ValueError("utilization must be between 0 and 1")
         if self.traffic_priority not in {"low", "medium", "high"}:
             raise ValueError("traffic_priority must be low, medium, or high")
 
@@ -109,9 +117,16 @@ class Packet:
     reroute_count: int = 0
     delivered_at_s: float | None = None
     drop_reason: str | None = None
+    current_location: str | None = None
+    latency_s: float | None = None
+    priority: str = "medium"
 
     def __post_init__(self) -> None:
         if not self.packet_id or not self.source or not self.destination:
             raise ValueError("packet ID, source, and destination are required")
         if self.size_bytes <= 0 or self.generated_at_s < 0:
             raise ValueError("packet size must be positive and generation time nonnegative")
+        if self.current_location is None:
+            self.current_location = self.source
+        if self.priority not in {"low", "medium", "high"}:
+            raise ValueError("priority must be low, medium, or high")

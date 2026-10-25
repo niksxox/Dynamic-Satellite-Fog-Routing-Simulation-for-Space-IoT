@@ -69,6 +69,7 @@ class TopologyEngine:
         # A link in this set stays unavailable across topology reconciliation
         # until an explicit recovery event removes it.
         self._failed_links: set[frozenset[str]] = set()
+        self._quality_overrides: dict[frozenset[str], dict[str, float]] = {}
 
     def initialize_network(self, nodes: list[Node], time_s: float = 0.0) -> nx.Graph:
         """Validate/store nodes and compute the initial available topology."""
@@ -138,15 +139,9 @@ class TopologyEngine:
         else:
             self._failed_links.add(key)
         if not self.graph.has_edge(source, target):
-            if operational:
-                return
-            a, b = self.nodes[source], self.nodes[target]
-            d = distance_km(a.position, b.position)
-            self.graph.add_edge(source, target, distance_km=d,
-                                propagation_latency_ms=propagation_delay_ms(d),
-                                bandwidth_mbps=min(a.bandwidth_mbps, b.bandwidth_mbps),
-                                packet_loss_probability=0.0, congestion=0.0, operational=False)
-            previous = True
+            # Keep an outage override without creating a physically impossible
+            # graph edge. It will take effect if the pair becomes eligible.
+            return
         else:
             previous = bool(self.graph.edges[source, target].get("operational", True))
             self.graph.edges[source, target]["operational"] = operational
@@ -154,6 +149,33 @@ class TopologyEngine:
             event_type = "link_up" if operational else "link_down"
             self.events.append(TopologyEvent(time_s, event_type, source, target))
             logger.info("link %s: %s <-> %s at %.3fs", event_type, source, target, time_s)
+
+    def set_link_conditions(
+        self,
+        source: str,
+        target: str,
+        time_s: float,
+        *,
+        congestion: float | None = None,
+        packet_loss_probability: float | None = None,
+    ) -> None:
+        """Update quality attributes and retain them across topology updates."""
+        key = frozenset((source, target))
+        if not self.graph.has_edge(source, target):
+            raise KeyError(f"link {source!r}<->{target!r} is not currently eligible")
+        changes: dict[str, float] = {}
+        if congestion is not None:
+            if not 0.0 <= congestion <= 1.0:
+                raise ValueError("congestion must be between 0 and 1")
+            changes["congestion"] = congestion
+        if packet_loss_probability is not None:
+            if not 0.0 <= packet_loss_probability <= 1.0:
+                raise ValueError("packet_loss_probability must be between 0 and 1")
+            changes["packet_loss_probability"] = packet_loss_probability
+        self.graph.edges[source, target].update(changes)
+        self._quality_overrides.setdefault(key, {}).update(changes)
+        if changes:
+            self.events.append(TopologyEvent(time_s, "link_conditions_changed", source, target))
 
     def update_topology(self, time_s: float) -> nx.Graph:
         """Reconcile range-eligible links; unchanged states produce no events."""
@@ -177,8 +199,12 @@ class TopologyEngine:
                     "distance_km": d,
                     "propagation_latency_ms": propagation_delay_ms(d),
                     "bandwidth_mbps": min(a.bandwidth_mbps, b.bandwidth_mbps),
-                    "packet_loss_probability": old.get("packet_loss_probability", 0.0),
-                    "congestion": old.get("congestion", 0.0),
+                    "packet_loss_probability": self._quality_overrides.get(key, {}).get(
+                        "packet_loss_probability", old.get("packet_loss_probability", 0.0)
+                    ),
+                    "congestion": self._quality_overrides.get(key, {}).get(
+                        "congestion", old.get("congestion", 0.0)
+                    ),
                     # Physical eligibility does not imply operational
                     # availability: an explicitly failed link stays down.
                     "operational": bool(old.get("operational", True)) and key not in self._failed_links,
@@ -190,13 +216,15 @@ class TopologyEngine:
             self.graph.add_edge(u, v, **attrs)
         old_keys, new_keys = set(prior), set(desired)
         for key in sorted(new_keys - old_keys, key=lambda k: sorted(k)):
-            u, v = sorted(key)
-            self.events.append(TopologyEvent(time_s, "link_up", u, v))
-            logger.info("link up: %s <-> %s at %.3fs", u, v, time_s)
+            if bool(desired[key].get("operational", True)):
+                u, v = sorted(key)
+                self.events.append(TopologyEvent(time_s, "link_up", u, v))
+                logger.info("link up: %s <-> %s at %.3fs", u, v, time_s)
         for key in sorted(old_keys - new_keys, key=lambda k: sorted(k)):
-            u, v = sorted(key)
-            self.events.append(TopologyEvent(time_s, "link_down", u, v))
-            logger.info("link down: %s <-> %s at %.3fs", u, v, time_s)
+            if bool(prior[key].get("operational", True)):
+                u, v = sorted(key)
+                self.events.append(TopologyEvent(time_s, "link_down", u, v))
+                logger.info("link down: %s <-> %s at %.3fs", u, v, time_s)
         return self.graph
 
     def topology_statistics(self) -> dict[str, int]:

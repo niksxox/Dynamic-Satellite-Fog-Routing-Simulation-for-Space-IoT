@@ -1,70 +1,70 @@
 # Dynamic Satellite-Fog Routing Simulation for Space-IoT
 
-Research-oriented simulation of packet routing through a changing network of IoT devices, LEO satellites, ground stations, fog nodes, and a cloud destination. This repository is being built in phases; only the typed model and dynamic topology foundation is implemented so far.
+Research simulation of packets routed through a changing graph of IoT devices, LEO satellites, ground stations, fog nodes, and a cloud destination. It is a software model, not a satellite-control system.
 
-## Phase 1 foundation
+## Implemented phases
 
-- Typed node, link, packet, and simulation configuration models with validation.
-- A NetworkX topology engine that connects only modeled node-type pairs within configured ranges.
-- Deterministic satellite movement using a circular XY projection. It is a simplified topology model, not high-fidelity orbital mechanics.
-- Link properties include distance in km, one-way propagation latency in ms, bandwidth in Mbps, packet-loss probability, congestion, and operational state.
-- Distinct physical eligibility and operational availability. Link/node state can be changed explicitly; subsequent topology updates reconcile physical eligibility. An explicit link failure persists across topology updates until a recovery event restores it (`TopologyEngine.set_link_operational(..., True)`).
-- Unit tests for geometry, propagation units, satellite movement, compatibility/ranges, state changes, and configuration checks.
+### Phase 1: models and topology
 
-Supported link pairs are satellite-satellite, satellite-ground station, ground station-fog, IoT-ground station, IoT-satellite, and fog-cloud. Ranges are configured independently in `config/default.yaml`. No edge is added solely to ensure connectivity.
+Typed node, link, packet, and configuration models; a NetworkX topology engine; configured physical link ranges; explicit node and link availability; and deterministic circular satellite movement in a Cartesian XY projection. The orbital projection is a simple, replaceable approximation, not validated orbital mechanics.
 
-## Phase 2: routing engine
+Supported link pairs: satellite-satellite, satellite-ground station, ground station-fog, IoT-ground station, IoT-satellite, and fog-cloud. Link distances use kilometers, propagation latency uses milliseconds, bandwidth uses decimal Mbps, and packet size uses bytes.
 
-- `src/routing/engine.py`: Dijkstra routing over the NetworkX topology graph with two modes:
-  - `shortest_latency`: minimizes propagation latency plus explicit transmission overhead, plus an optional size-dependent transmission delay when `packet_size_bytes` is given.
-  - `multi_factor`: minimizes a normalized convex combination of latency, bandwidth penalty, packet-loss probability, and congestion using the configured `RoutingWeights`. All metrics are min-max normalized across the evaluated network state so raw milliseconds, Mbps, and probabilities are never mixed. Equal min/max values are handled without division by zero.
-- `src/routing/__init__.py`: exports `RoutingEngine`, `RoutingMode`, `RoutingResult`.
-- `RoutingResult`: structured outcome with source, destination, algorithm, ordered node path, total routing cost, estimated path latency (ms), bottleneck bandwidth (Mbps), estimated delivery reliability, route availability, and a failure reason.
-- Only operational nodes and links are traversable; an explicitly failed link is never used even while physically eligible. Unknown endpoints, failed nodes, invalid edge attributes, and disconnected destinations return `route_available=False` with a reason — no route is ever invented.
-- Reliability is the product of per-link `(1 - packet_loss_probability)`, a simplified estimate assuming independent losses, not a measured delivery ratio.
+### Phase 2: routing
 
-### API example
+`src/routing/engine.py` provides two Dijkstra modes:
 
-```python
-from src.models.config import SimulationConfig
-from src.models.network import Node, NodeType, Position
-from src.topology.engine import TopologyEngine
-from src.routing import RoutingEngine, RoutingMode
+- `shortest_latency`: propagation plus explicit overhead and, when a packet size is supplied, size-dependent serialization latency.
+- `multi_factor`: nonnegative weighted cost from normalized latency, bandwidth penalty, packet loss, and congestion. The cost is dimensionless and separate from estimated physical latency.
 
-cfg = SimulationConfig(iot_ground_range_km=50.0)
-topo = TopologyEngine(cfg)
-topo.initialize_network([
-    Node("iot", NodeType.IOT, Position(0, 0)),
-    Node("gs", NodeType.GROUND_STATION, Position(10, 0)),
-])
+Only operational nodes and links can be routed. `RoutingResult` includes path, cost, estimated latency, bottleneck bandwidth, estimated reliability, availability, and a no-route reason. Reliability multiplies per-link success probabilities and assumes independent losses.
 
-router = RoutingEngine(cfg)
-result = router.route(topo.graph, "iot", "gs", RoutingMode.MULTI_FACTOR)
-print(result.path, result.estimated_latency_ms, result.bottleneck_bandwidth_mbps,
-      result.delivery_reliability, result.route_available)
-```
+### Phase 3: SimPy simulation and rerouting
 
-### Metric definitions
+`SimulationEngine` runs headlessly with one SimPy virtual-time environment. It coordinates topology refresh, Poisson or scheduled traffic, hop-by-hop forwarding, link/node failures and recovery, fog service, route decisions, structured events, and metrics. PostgreSQL, Streamlit, and experiment orchestration are not part of this phase.
 
-- `total_cost`: the optimized objective — path latency in ms for `shortest_latency`, otherwise the normalized multi-factor cost (dimensionless). Kept separate from estimated physical latency.
-- `estimated_latency_ms`: sum of link propagation latency plus `transmission_overhead_ms`, plus `packet_size_bytes * 8 / (bandwidth_mbps * 1e6)` seconds in ms when a packet size is provided. No packet size is assumed by default.
-- `bottleneck_bandwidth_mbps`: minimum link bandwidth along the path; `inf` for a trivial single-node path.
-- `delivery_reliability`: product of `(1 - packet_loss_probability)` over the path; empty path yields `1.0`.
-- `route_available`: whether a usable path exists; `reason` explains any failure.
+Traffic uses exponential inter-arrival times for a Poisson process unless a deterministic `schedule_s` tuple is supplied. Each source receives a separate seeded random stream. Packet IDs are deterministic within a run.
 
-## Setup
+The default link model is full duplex: each direction has an independent capacity-one serialization resource. `half_duplex_links: true` makes opposite directions share the resource. Serialization time is `packet_size_bytes * 8 / (bandwidth_mbps * 1,000,000)` seconds. The channel resource is held for serialization and configured overhead; propagation is in flight and may overlap other transmissions.
 
-Requires Python 3.11 or newer. Create and activate a virtual environment, then install pinned dependencies:
+An already-started frame completes its serialization and propagation if its link fails. A packet waiting for the link checks availability after acquiring the resource. At the next forwarding decision, an unavailable hop triggers a route computation from the packet's current node. Route computation has a configurable simulated delay (`route_computation_delay_ms`); a reroute count increments only when a valid replacement route is selected. If a recovery attempt exhausts its configured retries, the packet is dropped. Initial no-route attempts wait for a topology interval and are bounded by the same retry setting.
+
+Fog nodes use a shared SimPy resource with `fog_default_servers` capacity. Service time is the larger of configured `processing_delay_ms` and `1 / processing_capacity_pps` when a processing rate is configured. Queue wait is measured from the actual resource request and reported separately. Route estimates do not include fog service delay, so measured end-to-end delay counts it only when the packet is processed.
+
+Packets end as delivered, dropped, timed out, or `PENDING`. `PENDING` is a right-censored packet still active at the simulation horizon; it is not counted as a delivery or assigned a latency. PDR is delivered/generated, including pending packets in the denominator. Goodput is delivered payload bits divided by the full simulation observation window. Recovery time is route-selection time minus failure-detection time; failed recoveries have a separate count and no zero duration.
+
+Delivered-packet latency includes mean and median for any nonempty sample. The p95 field is left undefined until there are at least 20 delivered samples.
+
+In-memory packet and event records are capped by `max_generated_packets` and `max_event_records` in the config. The result indicates if the event cap truncated the log. Packet records are retained up to the packet cap.
+
+## Setup and commands
+
+Requires Python 3.11 or newer. Create a virtual environment and install the pinned stack:
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python -m pytest
 ```
 
-The full dependency list is pinned for the planned project stack. PostgreSQL is optional until the persistence phase; `.env.example` shows the expected connection variable. Do not put credentials in source control.
+Run the deterministic two-satellite failure/recovery example from the repository root:
 
-## Current limitations
+```powershell
+python -m scripts.run_simulation --seed 7 --duration 0.2
+```
 
-Routing is a static snapshot computation over the current topology graph: there is no SimPy packet forwarding, no time-dependent re-routing during a run, and no per-hop queueing. Reliability assumes independent per-link losses. Satellite motion/topology remains a simplified circular projection, not a validated orbit or coverage model. The dashboard, PostgreSQL persistence, and the complete SimPy simulation have not yet been implemented.
+Run all tests:
+
+```powershell
+python -m pytest -q
+```
+
+Phase 3 verification in the implementation environment: `python -m pytest -q` completed with **40 passed**. The documented demo command completed with 3 generated, 3 delivered, 0 dropped, and 1 reroute; measured mean latency was 0.0066039 s and route recovery time was 0.001 s. These are demonstration-run observations, not an algorithm comparison or performance claim.
+
+The runnable API is `SimulationEngine(config, nodes, traffic, failures=...).run()`. Structured packet records, events, decisions, topology/resource statistics, and metric summaries are returned in `SimulationResults`. `FailureSchedule` supports link/node failure and recovery, fog overload/recovery, congestion changes, and packet-loss changes.
+
+PostgreSQL settings are shown in `.env.example`; database setup remains for a later phase. Never commit credentials or `.env` files.
+
+## Model limitations and remaining phases
+
+Satellite motion is a deterministic circular projection, not a validated orbit or geographic line-of-sight model. The graph updates at configured intervals. Shared link resources limit serialization but do not model a lower-layer retransmission protocol. Packet loss drops the packet without retransmission. Fog overload currently marks the fog node unavailable; it does not dynamically reduce its service rate. Multi-factor weights normalize against the current usable edge set, so route costs are relative to that snapshot. Persistence, experiments, CSV exports, and the dashboard remain future work.
