@@ -15,7 +15,7 @@ class MetricsSummary:
     dropped: int
     timed_out: int
     pending: int
-    packet_delivery_ratio: float
+    packet_delivery_ratio: float | None
     throughput_bps: float
     mean_latency_s: float | None
     median_latency_s: float | None
@@ -57,7 +57,7 @@ def summarize(
         dropped=dropped,
         timed_out=timed_out,
         pending=pending,
-        packet_delivery_ratio=len(delivered) / len(packets) if packets else 0.0,
+        packet_delivery_ratio=len(delivered) / len(packets) if packets else None,
         throughput_bps=sum(p.size_bytes * 8 for p in delivered) / observation_window_s,
         mean_latency_s=mean(latencies) if latencies else None,
         median_latency_s=(latencies[(len(latencies) - 1) // 2] if len(latencies) % 2 else

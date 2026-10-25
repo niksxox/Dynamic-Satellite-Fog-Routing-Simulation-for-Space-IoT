@@ -7,6 +7,7 @@ import json
 import math
 
 from src.models.config import SimulationConfig
+from src.database.repositories import create_repository
 from src.models.network import Node, NodeType, Position
 from src.simulation import FailureSchedule, SimulationEngine
 from src.traffic import TrafficSpec
@@ -44,13 +45,18 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--duration", type=float, default=0.2,
                         help="virtual simulation duration in seconds (must exceed 1.7ms)")
+    parser.add_argument("--storage", choices=("auto", "memory", "postgres"), default="auto")
     args = parser.parse_args()
     if args.duration <= 0.0017:
         parser.error("--duration must exceed 0.0017 seconds for the scheduled failure")
-    result = build_demo(args.seed, args.duration).run()
+    repository = create_repository(args.storage)
+    engine = build_demo(args.seed, args.duration)
+    engine.repository = repository
+    result = engine.run()
     summary = result.metrics
     print(json.dumps({
         "run_id": result.run_id,
+        "storage_backend": repository.backend,
         "routing_mode": result.routing_mode,
         "seed": result.config.seed,
         "simulation_time_s": result.end_time_s,

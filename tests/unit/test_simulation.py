@@ -176,7 +176,7 @@ def test_empty_run_has_safe_metric_denominators():
     engine.traffic = []
     result = engine.run()
     assert result.metrics.generated == 0
-    assert result.metrics.packet_delivery_ratio == 0
+    assert result.metrics.packet_delivery_ratio is None
     assert result.metrics.throughput_bps == 0
     assert result.metrics.mean_latency_s is None
     assert result.metrics.p95_latency_s is None

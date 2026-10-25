@@ -62,6 +62,7 @@ class SimulationEngine:
         run_id: str = "run-1",
         topology: TopologyEngine | None = None,
         router: RoutingEngine | None = None,
+        repository=None,
     ) -> None:
         self.config = config
         self.nodes = {node.node_id: node for node in nodes}
@@ -87,6 +88,7 @@ class SimulationEngine:
         self.failures = sorted(failures or [], key=lambda f: f.time_s)
         self.routing_mode = RoutingMode(routing_mode)
         self.run_id = run_id
+        self.repository = repository
         self.topology = topology or TopologyEngine(config)
         self.router = router or RoutingEngine(config)
         for spec in self.traffic:
@@ -140,9 +142,28 @@ class SimulationEngine:
         if duration / self.config.topology_update_interval_s > self.config.max_event_records:
             raise ValueError("topology update count exceeds configured event safety limit")
         self._ran = True
+        persistence_started = False
+        if self.repository is not None:
+            self.repository.create_run(self.run_id, self.config, self.routing_mode.value,
+                                       self.config.seed, duration)
+            persistence_started = True
+        try:
+            return self._execute(duration)
+        except Exception as exc:
+            if persistence_started:
+                try:
+                    self.repository.mark_failed(self.run_id, exc)
+                except Exception as persist_exc:
+                    raise RuntimeError(f"simulation failed ({exc}); recording failure also failed ({persist_exc})") from exc
+            raise
+
+    def _execute(self, duration: float) -> SimulationResults:
         wall_start = time.perf_counter()
         self.env = simpy.Environment()
         self.topology.initialize_network(list(self.nodes.values()), time_s=0.0)
+        initial_links = [(a, b, dict(attrs)) for a, b, attrs in self.topology.graph.edges(data=True)]
+        if self.repository is not None:
+            self.repository.save_network_configuration(self.run_id, list(self.nodes.values()), initial_links)
         for event in self.topology.events:
             self._record_topology_event(event)
         self._topology_event_cursor = len(self.topology.events)
@@ -187,7 +208,12 @@ class SimulationEngine:
             per_node_statistics=self._final_node_statistics(),
             events_truncated=self._events_truncated,
             metrics=metrics,
+            node_configurations=list(self.nodes.values()),
+            initial_link_configurations=initial_links,
+            current_link_configurations=[(a, b, dict(attrs)) for a, b, attrs in self.topology.graph.edges(data=True)],
         )
+        if self.repository is not None:
+            self.repository.persist_results(self.results)
         logger.info("simulation %s completed in %.3fs wall time", self.run_id,
                     time.perf_counter() - wall_start)
         return self.results

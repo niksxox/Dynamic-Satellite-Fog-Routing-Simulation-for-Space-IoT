@@ -29,6 +29,9 @@ class SimulationResults:
     per_node_statistics: dict[str, dict[str, float]] = field(default_factory=dict)
     events_truncated: bool = False
     metrics: MetricsSummary | None = None
+    node_configurations: list[object] = field(default_factory=list)
+    initial_link_configurations: list[tuple[str, str, dict]] = field(default_factory=list)
+    current_link_configurations: list[tuple[str, str, dict]] = field(default_factory=list)
 
     @property
     def delivered_packets(self) -> list[Packet]:
