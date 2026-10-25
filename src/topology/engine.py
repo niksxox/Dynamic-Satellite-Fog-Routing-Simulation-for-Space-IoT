@@ -65,6 +65,10 @@ class TopologyEngine:
         self.nodes: dict[str, Node] = {}
         self.graph = nx.Graph()
         self.events: list[TopologyEvent] = []
+        # Explicit link failures persist independently of physical eligibility.
+        # A link in this set stays unavailable across topology reconciliation
+        # until an explicit recovery event removes it.
+        self._failed_links: set[frozenset[str]] = set()
 
     def initialize_network(self, nodes: list[Node], time_s: float = 0.0) -> nx.Graph:
         """Validate/store nodes and compute the initial available topology."""
@@ -120,9 +124,19 @@ class TopologyEngine:
         self.update_topology(time_s)
 
     def set_link_operational(self, source: str, target: str, operational: bool, time_s: float) -> None:
-        """Apply an explicit link outage/recovery without changing eligibility."""
+        """Apply an explicit link outage/recovery without changing eligibility.
+
+        The failure state is recorded in an explicit failure set that survives
+        topology reconciliation, so a failed link stays unavailable across
+        topology updates until a recovery event restores it.
+        """
         if source not in self.nodes or target not in self.nodes:
             raise KeyError(f"unknown link endpoint: {source!r}, {target!r}")
+        key = frozenset((source, target))
+        if operational:
+            self._failed_links.discard(key)
+        else:
+            self._failed_links.add(key)
         if not self.graph.has_edge(source, target):
             if operational:
                 return
@@ -165,7 +179,9 @@ class TopologyEngine:
                     "bandwidth_mbps": min(a.bandwidth_mbps, b.bandwidth_mbps),
                     "packet_loss_probability": old.get("packet_loss_probability", 0.0),
                     "congestion": old.get("congestion", 0.0),
-                    "operational": old.get("operational", True),
+                    # Physical eligibility does not imply operational
+                    # availability: an explicitly failed link stays down.
+                    "operational": bool(old.get("operational", True)) and key not in self._failed_links,
                     "max_range_km": max_range,
                 }
         self.graph.remove_edges_from(list(self.graph.edges))
@@ -191,3 +207,8 @@ class TopologyEngine:
             "links": self.graph.number_of_edges(),
             "operational_links": sum(bool(d.get("operational")) for _, _, d in self.graph.edges(data=True)),
         }
+
+    @property
+    def failed_links(self) -> set[frozenset[str]]:
+        """Explicitly failed links, independent of physical range eligibility."""
+        return set(self._failed_links)
