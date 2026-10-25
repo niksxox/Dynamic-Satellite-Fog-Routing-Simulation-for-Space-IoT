@@ -643,7 +643,8 @@ class SimulationEngine:
 
     def _record_topology_event(self, event) -> None:
         self._record(event.event_type, source=event.source, target=event.target,
-                     description=f"Topology {event.event_type}")
+                     description=f"Topology {event.event_type}",
+                     details=event.details or {})
 
     def _sync_topology_events(self) -> None:
         # Events are copied once into the structured run log.

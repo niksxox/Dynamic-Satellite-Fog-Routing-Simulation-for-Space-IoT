@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from src.models.config import SimulationConfig
 from src.models.network import Node, NodeType, Position
+from src.orbit.frames import earth_rotation_angle_rad, geodetic_to_ecef
+from src.orbit.models import GeodeticPosition, OrbitalElements
 from src.simulation.events import FailureSchedule
 from src.traffic import TrafficSpec
 
@@ -19,6 +21,15 @@ class ExperimentConfig:
     algorithms: tuple[str, ...] = ("shortest_latency", "multi_factor")
     output_dir: str = "experiment_output"
     storage: str = "local"
+    orbital_model: str | None = None
+    orbital_altitude_km: float = 550.0
+    orbital_inclination_deg: float = 53.0
+    orbital_raan_deg: float = 0.0
+    orbital_argument_of_latitude_deg: float = 0.0
+    station_latitude_deg: float = 0.0
+    station_longitude_deg: float = 0.0
+    station_altitude_m: float = 0.0
+    minimum_ground_elevation_deg: float = 10.0
 
     def __post_init__(self):
         if self.scenario not in SCENARIOS:
@@ -31,6 +42,8 @@ class ExperimentConfig:
             raise ValueError("algorithms must contain shortest_latency and/or multi_factor")
         if self.storage not in {"local", "postgres"}:
             raise ValueError("storage must be local or postgres")
+        if self.orbital_model not in {None, "legacy_xy", "circular_two_body"}:
+            raise ValueError("invalid orbital_model")
 
 
 @dataclass(frozen=True)
@@ -40,6 +53,8 @@ class ScenarioDefinition:
 
     def build(self, seed: int, duration_s: float, satellite_count: int,
               traffic_intensity: float):
+        if self.name in {"orbital_visibility_demo", "orbital_motion_with_link_failure"}:
+            return self._build_orbital(seed, duration_s, satellite_count, traffic_intensity)
         period = 1e12 if self.name == "stable_topology" else 1200.0
         config = SimulationConfig(seed=seed, duration_s=duration_s,
             topology_update_interval_s=min(1.0, duration_s), satellite_range_km=2500,
@@ -80,6 +95,45 @@ class ScenarioDefinition:
                         FailureSchedule(t, "node_failure", node_id=f"sat-{satellite_count - 1}")]
         return config, nodes, traffic, failures
 
+    def _build_orbital(self, seed: int, duration_s: float, satellite_count: int,
+                       traffic_intensity: float):
+        """Build a small, deterministic ECI/WGS-84 geometry demonstration."""
+        config = SimulationConfig(seed=seed, duration_s=duration_s,
+            topology_update_interval_s=min(5.0, duration_s), satellite_range_km=2500,
+            satellite_ground_range_km=2200, iot_ground_range_km=20,
+            iot_satellite_range_km=1500, ground_fog_range_km=150,
+            fog_cloud_range_km=1000, packet_timeout_s=max(0.2, duration_s * 0.8),
+            orbital_model="circular_two_body", minimum_ground_elevation_deg=10.0)
+        station_geo = GeodeticPosition(0.0, 0.0)
+        station = geodetic_to_ecef(station_geo)
+        nodes = [Node("iot-0", NodeType.IOT, geodetic_to_ecef(GeodeticPosition(0, 0.22)),
+                      latitude_deg=0, longitude_deg=0.22),
+                 Node("gs-0", NodeType.GROUND_STATION, station,
+                      latitude_deg=0, longitude_deg=0),
+                 Node("fog-0", NodeType.FOG, geodetic_to_ecef(GeodeticPosition(0, 0.005)),
+                      latitude_deg=0, longitude_deg=0.005, processing_capacity_pps=1000,
+                      processing_delay_ms=1),
+                 Node("cloud-0", NodeType.CLOUD, geodetic_to_ecef(GeodeticPosition(0, 0.01)),
+                      latitude_deg=0, longitude_deg=0.01)]
+        # At the reference epoch, this places the first satellite above the
+        # station at longitude zero. Small plane/phase offsets distinguish
+        # satellites while keeping initial ISLs within range.
+        phase0 = earth_rotation_angle_rad(config.reference_epoch_unix_s)
+        radius = config.earth_radius_km + 550.0
+        for i in range(satellite_count):
+            offset = (i - (satellite_count - 1) / 2) * 0.003
+            elements = OrbitalElements(radius, inclination_rad=math.radians((i % 3) * 0.5),
+                raan_rad=offset, argument_of_latitude_rad=phase0 + offset)
+            nodes.append(Node(f"sat-{i}", NodeType.SATELLITE, Position(radius, 0, 0, frame="eci"),
+                              orbit=elements, orbital_period_s=6000.0))
+        traffic = [TrafficSpec("iot-0", "cloud-0", rate_pps=traffic_intensity,
+                               packet_size_bytes=512, priority="medium")]
+        failures = []
+        if self.name == "orbital_motion_with_link_failure":
+            failures = [FailureSchedule(min(30.0, duration_s / 3), "link_failure",
+                                        source="sat-0", target="sat-1")]
+        return config, nodes, traffic, failures
+
 
 SCENARIOS = {
     name: ScenarioDefinition(name, description) for name, description in {
@@ -91,5 +145,7 @@ SCENARIOS = {
         "fog_node_overload": "The fog node becomes unavailable at the scheduled time.",
         "high_traffic_load": "Traffic rate is increased eightfold over configured intensity.",
         "multiple_simultaneous_failures": "An ISL and a satellite fail at the same time.",
+        "orbital_visibility_demo": "Two-body orbital motion changes visibility without scheduled failures.",
+        "orbital_motion_with_link_failure": "Orbital visibility changes while a scheduled ISL outage is active.",
     }.items()
 }

@@ -2,6 +2,9 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
+
+from src.orbit.models import GeodeticPosition, OrbitalElements
 
 
 class NodeType(str, Enum):
@@ -26,11 +29,18 @@ class PacketState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class Position:
-    """Cartesian position in kilometers in a shared simulated coordinate frame."""
+    """Cartesian position in km. ``frame`` identifies ECEF/ECI when known."""
 
     x_km: float
     y_km: float
     z_km: float = 0.0
+    frame: str = "unspecified"
+
+    def __post_init__(self):
+        if not all(math.isfinite(v) for v in (self.x_km, self.y_km, self.z_km)):
+            raise ValueError("position coordinates must be finite")
+        if self.frame not in {"unspecified", "legacy_xy", "ecef", "eci"}:
+            raise ValueError("position frame must be unspecified, legacy_xy, ecef, or eci")
 
 
 @dataclass(slots=True)
@@ -55,6 +65,10 @@ class Node:
     queue_length: int = 0
     utilization: float = 0.0
     attributes: dict[str, object] = field(default_factory=dict)
+    orbit: OrbitalElements | None = None
+    latitude_deg: float | None = None
+    longitude_deg: float | None = None
+    altitude_m: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.node_id.strip():
@@ -75,6 +89,14 @@ class Node:
             raise ValueError("utilization must be between 0 and 1")
         if self.traffic_priority not in {"low", "medium", "high"}:
             raise ValueError("traffic_priority must be low, medium, or high")
+        if (self.latitude_deg is None) != (self.longitude_deg is None):
+            raise ValueError("latitude_deg and longitude_deg must be provided together")
+        if self.latitude_deg is not None:
+            GeodeticPosition(self.latitude_deg, self.longitude_deg, self.altitude_m)
+        elif not math.isfinite(self.altitude_m):
+            raise ValueError("altitude_m must be finite")
+        if self.orbit is not None and self.node_type is not NodeType.SATELLITE:
+            raise ValueError("orbital elements are only valid for satellite nodes")
 
 
 @dataclass(slots=True)

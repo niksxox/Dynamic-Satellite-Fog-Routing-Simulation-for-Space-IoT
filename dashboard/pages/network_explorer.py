@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import streamlit as st
 
 from dashboard.components.network_view import network_figure
 from dashboard.utils.errors import storage_error
+from src.topology.engine import TopologyEngine
 
 
 def render(repository=None):
@@ -30,6 +33,26 @@ def render(repository=None):
         events = local_result.events
         decisions = local_result.routing_decisions
         run_desc = f"{local_result.routing_mode} · seed {local_result.config.seed} · end state at {local_result.end_time_s:g}s"
+        if local_result.config.orbital_model == "circular_two_body":
+            selected_time = st.slider("Virtual simulation time (s)", 0.0,
+                float(local_result.end_time_s), float(local_result.end_time_s), step=float(local_result.config.topology_update_interval_s), key="network_time")
+            engine = TopologyEngine(local_result.config)
+            replay_nodes = deepcopy(local_result.node_configurations)
+            engine.initialize_network(replay_nodes, 0.0)
+            replay_events = sorted(local_result.events, key=lambda e: e.timestamp_s)
+            for event in replay_events:
+                if event.timestamp_s > selected_time:
+                    break
+                if event.event_type in {"link_failure", "link_recovery"} and event.source and event.target:
+                    engine.set_link_operational(event.source, event.target,
+                        event.event_type == "link_recovery", event.timestamp_s)
+                elif event.event_type in {"node_failure", "node_recovery", "fog_overload", "fog_recovery"} and event.affected_node:
+                    engine.set_node_operational(event.affected_node,
+                        event.event_type in {"node_recovery", "fog_recovery"}, event.timestamp_s)
+            engine.update_topology(float(selected_time))
+            nodes = replay_nodes
+            links = [(a, b, dict(attrs)) for a, b, attrs in engine.graph.edges(data=True)]
+            run_desc += f" · geometry recomputed at {selected_time:g}s"
     elif repository:
         try:
             network = repository.get_network_configuration(run_id)
@@ -83,7 +106,7 @@ def render(repository=None):
                 "algorithm": d.algorithm, "available": d.available, "path": list(d.path),
                 "recovery_ms": None if d.recovery_time_s is None else d.recovery_time_s * 1000}
                 for d in packet_routes], use_container_width=True, hide_index=True)
-    st.caption("The graph shows the last captured topology state and actual packet path. The simulator does not record timestamped node-position snapshots for a faithful historical animation.")
+    st.caption("Circular two-body views recompute geometry at the selected virtual time from stored orbit inputs and recorded failure/recovery events. The plot is a 2D ECI X/Y projection, not a validated ephemeris or a full 3D globe.")
 
 
 def _include_unavailable(initial, current):

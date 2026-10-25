@@ -20,6 +20,27 @@ def render(repository=None, storage="local"):
     satellites = c5.number_input("Satellite count", min_value=2, max_value=64, value=3, step=1)
     traffic = st.number_input("Base traffic intensity (packets/s)", min_value=0.1, max_value=1000.0, value=10.0, step=1.0,
         help="The high-traffic scenario multiplies this base rate by eight.")
+    default_orbit = "circular_two_body" if scenario.startswith("orbital_") else "legacy_xy"
+    orbital_model = st.selectbox("Orbital model", ["legacy_xy", "circular_two_body"],
+        index=["legacy_xy", "circular_two_body"].index(default_orbit),
+        format_func=lambda x: "Legacy XY demo" if x == "legacy_xy" else "Circular two-body (ECI / WGS-84)")
+    orbital_settings = {"orbital_model": orbital_model}
+    if orbital_model == "circular_two_body":
+        with st.expander("Orbital and ground station geometry", expanded=True):
+            o1, o2, o3 = st.columns(3)
+            orbital_settings["altitude_km"] = o1.number_input("Satellite altitude (km)", min_value=100.0, max_value=2000.0, value=550.0, step=25.0)
+            orbital_settings["inclination_deg"] = o2.number_input("Inclination (degrees)", min_value=0.0, max_value=180.0, value=53.0, step=1.0)
+            orbital_settings["raan_deg"] = o3.number_input("RAAN (degrees)", min_value=0.0, max_value=360.0, value=0.0, step=5.0)
+            o4, o5, o6 = st.columns(3)
+            orbital_settings["argument_of_latitude_deg"] = o4.number_input("Reference argument of latitude (degrees)", min_value=0.0, max_value=360.0, value=0.0, step=5.0)
+            orbital_settings["station_latitude_deg"] = o5.number_input("Station latitude (degrees)", min_value=-90.0, max_value=90.0, value=0.0, step=1.0)
+            orbital_settings["station_longitude_deg"] = o6.number_input("Station longitude (degrees)", min_value=-180.0, max_value=180.0, value=0.0, step=1.0)
+            o7, o8 = st.columns(2)
+            orbital_settings["station_altitude_m"] = o7.number_input("Station altitude (m)", min_value=-1000.0, max_value=10000.0, value=0.0, step=10.0)
+            orbital_settings["minimum_elevation_deg"] = o8.number_input("Minimum elevation (degrees)", min_value=0.0, max_value=90.0, value=10.0, step=1.0)
+        st.caption("Circular two-body propagation in ECI; terrestrial positions use WGS-84 ECEF rotated with UT1=UTC. Demo geometry is not a validated ephemeris.")
+    else:
+        st.caption("Legacy XY circular projection for compatibility with earlier saved configurations.")
     paired = st.checkbox("Run paired experiment when both algorithms are selected", value=True, disabled=algorithm != "both")
     st.caption(f"Storage: **{getattr(repository, 'backend', 'local session + local experiment exports') if storage == 'postgres' else 'local session + local experiment exports'}**")
     busy = st.session_state.get("dashboard_busy", False)
@@ -32,7 +53,7 @@ def render(repository=None, storage="local"):
                 outdir = "experiment_output/dashboard"
                 with st.spinner("Running both matched simulation arms…"):
                     bundle = run_paired_experiment(scenario, "both", int(seed), float(duration),
-                        int(satellites), float(traffic), outdir, repository)
+                        int(satellites), float(traffic), outdir, repository, orbital_settings)
                     export_experiment(bundle, outdir)
                 st.session_state.setdefault("dashboard_experiments", []).insert(0, bundle)
                 st.success(f"Experiment {bundle['experiment_id']} finished: {bundle['status']} · storage {bundle['storage']}.")
@@ -47,7 +68,7 @@ def render(repository=None, storage="local"):
                 for mode in ("shortest_latency", "multi_factor"):
                     with st.spinner(f"Simulating {scenario.replace('_', ' ')} with {mode}…"):
                         result, metadata = run_simulation(scenario, mode, int(seed), float(duration),
-                            int(satellites), float(traffic), repository)
+                            int(satellites), float(traffic), repository, orbital_settings)
                     st.session_state.setdefault("dashboard_runs", {})[result.run_id] = result
                     st.session_state.setdefault("dashboard_run_metadata", {})[result.run_id] = metadata
                     st.success(f"{mode}: {result.run_id} completed")
@@ -55,7 +76,7 @@ def render(repository=None, storage="local"):
                 mode = algorithm
                 with st.spinner(f"Simulating {scenario.replace('_', ' ')} with {mode}…"):
                     result, metadata = run_simulation(scenario, mode, int(seed), float(duration),
-                        int(satellites), float(traffic), repository)
+                        int(satellites), float(traffic), repository, orbital_settings)
                 st.session_state.setdefault("dashboard_runs", {})[result.run_id] = result
                 st.session_state.setdefault("dashboard_run_metadata", {})[result.run_id] = metadata
                 if metadata["expected_event_applied"] is False:

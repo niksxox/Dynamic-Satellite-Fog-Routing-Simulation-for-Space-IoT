@@ -15,7 +15,7 @@ def _node_data(node):
         pos = cfg.get("position", {})
         return node.get("node_id", cfg.get("node_id", "?")), node.get("node_type", cfg.get("node_type", "?")), pos, cfg
     pos = node.position
-    return node.node_id, node.node_type.value, {"x_km": pos.x_km, "y_km": pos.y_km}, {
+    return node.node_id, node.node_type.value, {"x_km": pos.x_km, "y_km": pos.y_km, "frame": pos.frame}, {
         "operational": node.operational, "communication_range_km": node.communication_range_km,
         "bandwidth_mbps": node.bandwidth_mbps, "processing_delay_ms": node.processing_delay_ms,
         "processing_capacity_pps": node.processing_capacity_pps,
@@ -49,16 +49,25 @@ def network_figure(nodes, links, selected_path=(), selected_event=None):
             continue
         active = bool(attrs.get("operational", True))
         highlighted = frozenset((source, target)) in selected_edges
-        color = "#2bd49b" if active else "#ee5260"
+        if active:
+            color, dash, state_default = "#2bd49b", "solid", "usable for routing"
+        elif attrs.get("geometrically_visible") and not attrs.get("administratively_enabled", True):
+            color, dash, state_default = "#ffad42", "dash", "administratively disabled"
+        elif attrs.get("geometrically_visible"):
+            color, dash, state_default = "#ee5260", "dot", "visible; endpoint unavailable"
+        else:
+            color, dash, state_default = "#ee5260", "dash", "unavailable"
         width = 4 if highlighted else 1.5
         x1, y1 = coords[source]; x2, y2 = coords[target]
-        state = attrs.get("dashboard_state", "active" if active else "failed/unavailable")
+        state = attrs.get("dashboard_state", state_default)
         details = (f"{source} ↔ {target}<br>State: {state}<br>"
             f"Bandwidth: {attrs.get('bandwidth_mbps', 'unavailable')} Mbps<br>"
             f"Propagation: {attrs.get('propagation_latency_ms', 'unavailable')} ms<br>"
-            f"Packet loss: {attrs.get('packet_loss_probability', 'unavailable')}")
+            f"Packet loss: {attrs.get('packet_loss_probability', 'unavailable')}<br>"
+            f"Geometric visibility: {attrs.get('geometrically_visible', 'unknown')}<br>"
+            f"Elevation: {attrs.get('elevation_deg', 'not applicable')} degrees")
         figure.add_trace(go.Scatter(x=[x1, x2, None], y=[y1, y2, None], mode="lines",
-            line={"color": color, "width": width, "dash": "solid" if active else "dash"},
+            line={"color": color, "width": width, "dash": dash},
             hoverinfo="text", text=[details, details, ""], showlegend=False))
     if selected_event:
         source, target = selected_event.get("source"), selected_event.get("target")
@@ -83,8 +92,10 @@ def network_figure(nodes, links, selected_path=(), selected_event=None):
                 "color": ["#ffffff" if r[0] in path_nodes else COLORS.get(node_type, "#cccccc") for r in group],
                 "line": {"color": COLORS.get(node_type, "#cccccc"), "width": 2}},
             customdata=[str(r[4]) for r in group], hovertemplate="%{text}<br>Type: " + node_type + "<br>%{customdata}<extra></extra>"))
+    frames = {row[4].get("frame") for row in node_rows}
+    projection = "ECI" if "eci" in frames else "Legacy XY" if "legacy_xy" in frames else "Position"
     figure.update_layout(template="plotly_dark", height=520, margin={"l": 10, "r": 10, "t": 25, "b": 10},
-        xaxis_title="X position (km)", yaxis_title="Y position (km)",
+        xaxis_title=f"{projection} X projection (km)", yaxis_title=f"{projection} Y projection (km)",
         legend={"orientation": "h", "y": -0.15}, plot_bgcolor="#0b1724", paper_bgcolor="#0b1724",
         xaxis={"gridcolor": "#21364a"}, yaxis={"gridcolor": "#21364a", "scaleanchor": "x", "scaleratio": 1})
     return figure

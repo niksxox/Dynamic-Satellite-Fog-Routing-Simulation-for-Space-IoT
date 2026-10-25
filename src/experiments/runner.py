@@ -5,6 +5,7 @@ import uuid
 from dataclasses import asdict
 
 from src.experiments.scenarios import ExperimentConfig, SCENARIOS
+from src.experiments.orbital import apply_orbital_settings
 from src.routing import RoutingMode
 from src.simulation import SimulationEngine
 
@@ -69,6 +70,17 @@ class ExperimentRunner:
                     sim_config, nodes, traffic, failures = scenario.build(seed,
                         self.config.duration_s, self.config.satellite_count,
                         self.config.traffic_intensity)
+                    if self.config.orbital_model is not None:
+                        sim_config, nodes = apply_orbital_settings(sim_config, nodes,
+                        orbital_model=self.config.orbital_model,
+                        altitude_km=self.config.orbital_altitude_km,
+                        inclination_deg=self.config.orbital_inclination_deg,
+                        raan_deg=self.config.orbital_raan_deg,
+                        argument_of_latitude_deg=self.config.orbital_argument_of_latitude_deg,
+                        station_latitude_deg=self.config.station_latitude_deg,
+                        station_longitude_deg=self.config.station_longitude_deg,
+                        station_altitude_m=self.config.station_altitude_m,
+                        minimum_elevation_deg=self.config.minimum_ground_elevation_deg)
                     base["event_schedule"] = [asdict(f) for f in failures]
                     base["traffic_parameters"] = [{"source": t.source, "destination": t.destination,
                         "rate_pps": t.rate_pps, "packet_size_bytes": t.packet_size_bytes,
@@ -79,17 +91,35 @@ class ExperimentRunner:
                         "iot_satellite_range_km": sim_config.iot_satellite_range_km,
                         "ground_fog_range_km": sim_config.ground_fog_range_km,
                         "topology_update_interval_s": sim_config.topology_update_interval_s,
-                        "satellite_count": self.config.satellite_count}
+                        "satellite_count": self.config.satellite_count,
+                        "orbital_model": sim_config.orbital_model,
+                        "coordinate_frame": ("ECI satellites; WGS-84 ECEF terrestrial nodes with UT1=UTC rotation"
+                            if sim_config.orbital_model == "circular_two_body" else "legacy XY projection"),
+                        "reference_epoch_unix_s": sim_config.reference_epoch_unix_s,
+                        "earth_radius_km": sim_config.earth_radius_km,
+                        "earth_flattening": sim_config.earth_flattening,
+                        "earth_mu_km3_s2": sim_config.earth_mu_km3_s2,
+                        "minimum_ground_elevation_deg": sim_config.minimum_ground_elevation_deg,
+                        "satellite_orbits": {n.node_id: asdict(n.orbit) for n in nodes if n.orbit is not None}}
                     engine = SimulationEngine(sim_config, nodes, traffic,
                         routing_mode=RoutingMode(algorithm), failures=failures,
                         run_id=run_id, repository=self.repository)
                     result = engine.run()
                     metrics = metrics_from_result(result)
+                    geometry_events = [e for e in result.events
+                        if e.event_type in {"link_geometrically_available", "link_geometrically_unavailable"}]
+                    base["geometry_transition_count"] = len(geometry_events)
+                    base["topology_event_counts"] = {
+                        kind: sum(e.event_type == kind for e in result.events)
+                        for kind in sorted({e.event_type for e in result.events
+                            if e.event_type.startswith("link_")})}
                     expected = {"inter_satellite_link_failure": {"link_failure"},
                                 "satellite_node_failure": {"node_failure"},
                                 "congestion_spike": {"congestion_change"},
                                 "fog_node_overload": {"fog_overload"},
                                 "multiple_simultaneous_failures": {"link_failure", "node_failure"}}.get(self.config.scenario)
+                    if self.config.scenario == "orbital_motion_with_link_failure":
+                        expected = {"link_failure"}
                     applied = None if expected is None else expected <= {e.event_type for e in result.events}
                     base.update(status="completed", metrics=metrics,
                                 expected_event_applied=applied,
