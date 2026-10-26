@@ -121,23 +121,20 @@ class ExperimentRunner:
                     if self.config.scenario == "orbital_motion_with_link_failure":
                         expected = {"link_failure"}
                     applied = None if expected is None else expected <= {e.event_type for e in result.events}
-                    base.update(status="completed", metrics=metrics,
+                    status = "completed"
+                    notes_extra = None
+                    if expected is not None and applied is False:
+                        status = "invalid"
+                        notes_extra = "Required scenario event not verified/applied."
+                    base.update(status=status, metrics=metrics,
                                 expected_event_applied=applied,
-                                event_schedule=[asdict(f) for f in failures])
-                    if applied is False:
-                        base["notes"] = "Scheduled event did not produce a matching emitted simulation event."
+                                event_schedule=[asdict(f) for f in failures],
+                                metrics_valid=True)
+                    if notes_extra:
+                        base["notes"] = notes_extra
                 except Exception as exc:
                     base["error"] = f"{type(exc).__name__}: {exc}"
-                if self.repository is not None and hasattr(self.repository, "record_experiment_run"):
-                    self.repository.record_experiment_run(experiment_id, base)
-                rows.append(base)
-        elapsed = time.perf_counter() - started
-        result_bundle = {"experiment_id": experiment_id, "scenario": self.config.scenario,
-            "definition": scenario.description, "configuration": snapshot,
-            "metric_definitions": metric_definitions(), "rows": rows,
-            "wall_clock_duration_s": elapsed,
-            "status": "completed" if all(r["status"] == "completed" for r in rows) else "completed_with_failures",
-            "storage": getattr(self.repository, "backend", "local_export_only")}
+                    base["status"] = "failed"
         if self.repository is not None and hasattr(self.repository, "finish_experiment"):
             self.repository.finish_experiment(experiment_id, result_bundle["status"], elapsed)
         return result_bundle

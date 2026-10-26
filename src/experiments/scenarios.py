@@ -19,17 +19,6 @@ class ExperimentConfig:
     satellite_count: int = 3
     traffic_intensity: float = 10.0
     algorithms: tuple[str, ...] = ("shortest_latency", "multi_factor")
-    output_dir: str = "experiment_output"
-    storage: str = "local"
-    orbital_model: str | None = None
-    orbital_altitude_km: float = 550.0
-    orbital_inclination_deg: float = 53.0
-    orbital_raan_deg: float = 0.0
-    orbital_argument_of_latitude_deg: float = 0.0
-    station_latitude_deg: float = 0.0
-    station_longitude_deg: float = 0.0
-    station_altitude_m: float = 0.0
-    minimum_ground_elevation_deg: float = 10.0
 
     def __post_init__(self):
         if self.scenario not in SCENARIOS:
@@ -38,8 +27,9 @@ class ExperimentConfig:
             raise ValueError("seeds must be a non-empty tuple of unique integers")
         if self.duration_s <= 0 or self.satellite_count < 2 or self.traffic_intensity <= 0:
             raise ValueError("duration, traffic intensity, and satellite_count (>=2) must be positive")
-        if not self.algorithms or any(a not in {"shortest_latency", "multi_factor"} for a in self.algorithms):
-            raise ValueError("algorithms must contain shortest_latency and/or multi_factor")
+        valid_algos = {"shortest_latency", "multi_factor", "congestion_aware", "reliability_aware"}
+        if not self.algorithms or any(a not in valid_algos for a in self.algorithms):
+            raise ValueError("algorithms must be in %s" % sorted(valid_algos))
         if self.storage not in {"local", "postgres"}:
             raise ValueError("storage must be local or postgres")
         if self.orbital_model not in {None, "legacy_xy", "circular_two_body"}:
@@ -76,6 +66,12 @@ class ScenarioDefinition:
             Node("cloud-0", NodeType.CLOUD, Position(7000, 902)),
         ])
         rate = traffic_intensity * (8 if self.name == "high_traffic_load" else 1)
+        if self.name == "traffic_load_sweep_low":
+            rate = traffic_intensity * 1.0
+        elif self.name == "traffic_load_sweep_med":
+            rate = traffic_intensity * 2.0
+        elif self.name == "traffic_load_sweep_high":
+            rate = traffic_intensity * 4.0
         traffic = [TrafficSpec("iot-0", "cloud-0", rate_pps=rate,
                                packet_size_bytes=512, priority="medium")]
         t = min(duration_s * 0.25, max(0.02, duration_s * 0.1))
@@ -147,5 +143,8 @@ SCENARIOS = {
         "multiple_simultaneous_failures": "An ISL and a satellite fail at the same time.",
         "orbital_visibility_demo": "Two-body orbital motion changes visibility without scheduled failures.",
         "orbital_motion_with_link_failure": "Orbital visibility changes while a scheduled ISL outage is active.",
+        "traffic_load_sweep_low": "Traffic-load sweep low (base intensity).",
+        "traffic_load_sweep_med": "Traffic-load sweep medium (2x base intensity).",
+        "traffic_load_sweep_high": "Traffic-load sweep high (4x base intensity).",
     }.items()
 }

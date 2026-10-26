@@ -39,6 +39,8 @@ BITS_PER_MEGABIT = 1_000_000.0
 class RoutingMode(str, Enum):
     SHORTEST_LATENCY = "shortest_latency"
     MULTI_FACTOR = "multi_factor"
+    CONGESTION_AWARE = "congestion_aware"
+    RELIABILITY_AWARE = "reliability_aware"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +74,7 @@ class RoutingEngine:
         mode: RoutingMode | str = RoutingMode.SHORTEST_LATENCY,
         weights: RoutingWeights | None = None,
         packet_size_bytes: int | None = None,
+        congestion_penalty: float = 1.0,
     ) -> RoutingResult:
         """Route from source to destination with the selected Dijkstra mode.
 
@@ -102,6 +105,8 @@ class RoutingEngine:
         self._validate_weights(weights)
         if packet_size_bytes is not None and packet_size_bytes <= 0:
             raise ValueError("packet_size_bytes must be positive when provided")
+        if congestion_penalty < 0:
+            raise ValueError("congestion_penalty must be nonnegative")
 
         algorithm = mode.value
         if source not in graph:
@@ -118,7 +123,8 @@ class RoutingEngine:
             )
 
         working = self._build_working_graph(
-            graph, source, destination, weights, mode, packet_size_bytes
+            graph, source, destination, weights, mode, packet_size_bytes,
+            congestion_penalty=congestion_penalty
         )
         try:
             path = nx.dijkstra_path(working, source, destination, weight="cost")
@@ -152,6 +158,7 @@ class RoutingEngine:
         weights: RoutingWeights,
         mode: RoutingMode,
         packet_size_bytes: int | None,
+        congestion_penalty: float = 1.0,
     ) -> nx.Graph:
         """Copy operational nodes and valid links into a working graph.
 
@@ -198,6 +205,36 @@ class RoutingEngine:
                 "congestion": congestion,
             }
             working.add_edge(u, v, **dict(data), latency_ms=latency)
+
+        if mode is RoutingMode.SHORTEST_LATENCY:
+            for u, v in working.edges:
+                working.edges[u, v]["cost"] = float(working.edges[u, v]["latency_ms"])
+            return working
+
+        if mode is RoutingMode.CONGESTION_AWARE:
+            # Use only observable attributes at decision time (congestion). 
+            # Penalty is additive to latency; normalized by latency scale if useful but keep explicit.
+            for u, v, data in working.edges(data=True):
+                latency = float(data.get("latency_ms", 0.0))
+                congestion = float(graph.edges[u, v].get("congestion", data.get("congestion", 0.0)))
+                # Keep nonnegative; congestion in [0,1]
+                cost = latency + congestion_penalty * congestion * max(latency, 1e-12)
+                working.edges[u, v]["cost"] = float(cost)
+            return working
+
+        if mode is RoutingMode.RELIABILITY_AWARE:
+            for u, v, data in working.edges(data=True):
+                loss = float(graph.edges[u, v].get("packet_loss_probability", data.get("packet_loss_probability", 0.0)))
+                if loss >= 1.0 - 1e-18:
+                    # Effectively infinite cost / exclude by setting very high cost; Dijkstra will not prefer impossible unless forced
+                    working.edges[u, v]["cost"] = float("inf")
+                    continue
+                if loss < 0.0:
+                    loss = 0.0
+                # edge_cost = -log(1 - p_loss)
+                edge_cost = -math.log(1.0 - loss)
+                working.edges[u, v]["cost"] = float(edge_cost)
+            return working
 
         if metrics:
             values = {
