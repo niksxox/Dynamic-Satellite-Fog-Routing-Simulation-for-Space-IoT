@@ -70,6 +70,10 @@ The repository includes a Render Blueprint for the existing Streamlit dashboard.
 
 The free web service can sleep while idle and take longer to start on its next visit. This project does not require a database for a demo; choose local session storage in the dashboard. Local session data is in memory and is not durable across service restarts. For persistent run history, provision PostgreSQL separately and configure `DATABASE_URL` as a secret environment variable in Render; do not commit database credentials to the repository.
 
+## SatRoute visualization prototype
+
+The separate React/FastAPI visualization prototype is available in [`satroute-prototype/`](./satroute-prototype/). It is kept isolated from the Streamlit dashboard and is not included in the Render Blueprint above. Follow [its README](./satroute-prototype/README.md) to run it locally. Its satellite positions can be estimated from public TLE data; the network routes and metrics remain simulated.
+
 Phase 3 verification in the implementation environment: `python -m pytest -q` completed with **40 passed**. The documented demo command completed with 3 generated, 3 delivered, 0 dropped, and 1 reroute; measured mean latency was 0.0066039 s and route recovery time was 0.001 s. These are demonstration-run observations, not an algorithm comparison or performance claim.
 
 The runnable API is `SimulationEngine(config, nodes, traffic, failures=...).run()`. Structured packet records, events, decisions, topology/resource statistics, and metric summaries are returned in `SimulationResults`. `FailureSchedule` supports link/node failure and recovery, fog overload/recovery, congestion changes, and packet-loss changes.
