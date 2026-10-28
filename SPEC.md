@@ -388,7 +388,7 @@ Engine exposes `step(dt_wall)`, `apply_command(cmd)`, `snapshot()`, and `run_hea
 ```ts
 type Init = { type:'init'; config: SimConfig; ground: {id:number; name:string; lat:number; lon:number}[]; flows: Flow[]; nSats:number; planes:number[] }
 type Frame = {
-  type:'frame'; t:number; scale:number; running:boolean; tickMs:number;
+  type:'frame'; positionSource?:'simulation'|'tle'; t:number; scale:number; running:boolean; tickMs:number;
   sats: {id:number; lat:number; lon:number; alt:number; vlat:number; vlon:number; st:0|1|2|3}[]; // st: 0 ok, 1 down, 2 eclipse, 3 manual/pinned. v* = deg per WALL second (for client extrapolation)
   links: {a:number; b:number; k:0|1; up:0|1; rho:number; ms:number; loss:number}[];                  // k: 0 ISL, 1 GSL; rho from the viewed algorithm
   flows: {id:string; adaptive:FlowEval; static:FlowEval}[];
@@ -400,6 +400,8 @@ type Metrics  = { latMs:number; pdr:number; thrMbps:number; reroutes:number; rer
 type SimEvent = { t:number; level:'info'|'warn'|'crit'; kind:string; msg:string }
 type Ack = { type:'ack'; id?:string } | { type:'error'; msg:string } | { type:'orbit_preview'; id:number; track:[number,number][] }
 ```
+In live frames, `metrics.*.pdr` and `metrics.linkUptime` are ratios from 0 to 1; the UI formats them as percentages. Headless summary output may report percentages.
+`positionSource` is `tle` when positions come from CelesTrak GP or the documented fallback TLE API propagated with SGP4; otherwise it is `simulation`. Satellite network routes, link status, and performance metrics are model-generated, never observed operational traffic. The fallback rejects TLEs older than 48 hours and reports its source in tracking status.
 **Client → server:** `{type:'cmd', cmd:string, args:object, id?:string}`
 Commands: `play`, `pause`, `reset`, `set_scale{scale}`, `set_weights{a,b,c}`, `set_params{...}`, `fail_link{a,b}`, `restore_link{a,b}`, `fail_sat{id}`, `restore_sat{id}`, `move_sat{id,lat,lon}`, `move_gs{id,lat,lon}`, `preview_orbit{id,lat,lon}`, `set_flow_scale{factor}`, `add_flow{src,dst,mbps}`, `remove_flow{id}` — MVP adds `add_sat`, `remove_sat`, `pin_sat`, `add_gs`, `add_storm`, `move_storm`, `fail_plane{plane}`, `load_scenario{name}`.
 

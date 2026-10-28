@@ -1,58 +1,8 @@
-// SatRoute TypeScript types mirroring backend/app/schemas.py and docs/SPEC.md §12
-
-export interface ConstellationConfig {
-  T: number;
-  P: number;
-  F: number;
-  inc_deg: number;
-  alt_km: number;
-}
-
-export interface IslConfig {
-  max_range_km: number;
-  build_frac: number;
-  max_deg: number;
-}
-
-export interface GslConfig {
-  el_min_deg: number;
-  k: number;
-  drop_margin_deg: number;
-}
-
-export interface CapacityConfig {
-  isl_mbps: number;
-  gsl_mbps: number;
-}
-
-export interface FailuresConfig {
-  mtbf_link_s: number;
-  down_s: [number, number];
-  intensity: number;
-  detect_delay_s: number;
-}
-
-export interface RoutingConfig {
-  weights: [number, number, number];
-  chunks: number;
-  stickiness: number;
-  cadence_ticks: number;
-}
-
-export interface SimParamsConfig {
-  tick_s: number;
-  time_scale: number;
-  seed: number;
-}
-
+// SatRoute TypeScript types mirror the payload emitted by backend/app.
 export interface SimConfig {
-  constellation: ConstellationConfig;
-  isl: IslConfig;
-  gsl: GslConfig;
-  capacity: CapacityConfig;
-  failures: FailuresConfig;
-  routing: RoutingConfig;
-  sim: SimParamsConfig;
+  num_sats: number;
+  time_scale: number;
+  cadence_ticks: number;
 }
 
 export interface GroundStation {
@@ -64,8 +14,8 @@ export interface GroundStation {
 
 export interface Flow {
   id: string;
-  src_gs: number;
-  dst_gs: number;
+  src: number;
+  dst: number;
   mbps: number;
 }
 
@@ -142,6 +92,7 @@ export interface InitMessage {
 
 export interface FrameMessage {
   type: 'frame';
+  positionSource?: 'simulation' | 'tle';
   t: number;
   scale: number;
   running: boolean;
@@ -160,13 +111,15 @@ export interface AckResponse {
 
 export interface ErrorResponse {
   type: 'error';
-  msg: string;
+  msg?: string;
+  error?: string;
+  id?: string | number;
 }
 
 export interface OrbitPreviewResponse {
   type: 'orbit_preview';
-  id: number;
-  track: [number, number][];
+  id?: number;
+  track?: [number, number][];
 }
 
 export type ServerMessage =
@@ -197,7 +150,33 @@ export type CommandName =
 
 export interface ClientCommand {
   type: 'cmd';
-  cmd: CommandName | string;
-  args?: Record<string, any>;
-  id?: string;
+  cmd: CommandName;
+  args?: Record<string, unknown>;
+  id?: string | number;
+}
+
+export interface TrackedSatelliteInfo {
+  id: number;
+  norad_id: number;
+  name: string;
+}
+
+export interface TrackingStatus {
+  available: boolean;
+  source: string;
+  refreshed_at: string | null;
+  oldest_tle_epoch: string | null;
+  data_age_seconds: number | null;
+  satellite_count: number;
+  satellites: TrackedSatelliteInfo[];
+  error: string | null;
+}
+
+export interface GroundTrack {
+  satellite_id: number;
+  norad_id: number;
+  name: string;
+  start: string;
+  end: string;
+  track: [number, number][];
 }

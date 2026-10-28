@@ -6,7 +6,7 @@ from pathlib import Path
 root_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root_dir / "backend"))
 
-from app.schemas import FrameMessage
+from app.schemas import Frame
 
 def main():
     sample_file = root_dir / "docs" / "sample_frame.json"
@@ -18,8 +18,8 @@ def main():
         data = json.load(f)
 
     try:
-        frame = FrameMessage.model_validate(data)
-        print("✓ docs/sample_frame.json validated successfully against app.schemas.FrameMessage!")
+        frame = Frame.model_validate(data)
+        print("docs/sample_frame.json validated successfully against app.schemas.Frame!")
         print(f"  Timestamp: {frame.t}s, Sats: {len(frame.sats)}, Links: {len(frame.links)}, Flows: {len(frame.flows)}")
     except Exception as e:
         print(f"✗ Validation failed: {e}")

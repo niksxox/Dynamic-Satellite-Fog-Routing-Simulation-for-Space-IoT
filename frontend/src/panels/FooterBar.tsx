@@ -1,9 +1,9 @@
 import React from 'react';
 import { useSimStore } from '../store/useSim';
-import { CheckCircle2, AlertTriangle, AlertOctagon, Info } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, AlertOctagon, X } from 'lucide-react';
 
 export const FooterBar: React.FC = () => {
-  const { latestFrame, fps } = useSimStore();
+  const { latestFrame, fps, lastError, setError } = useSimStore();
   const activeFailures = latestFrame?.metrics.activeFailures ?? 0;
   const pdr = latestFrame?.metrics.adaptive.pdr ?? 1.0;
   const events = latestFrame?.events ?? [];
@@ -35,11 +35,18 @@ export const FooterBar: React.FC = () => {
 
       {/* Center Event Toast Feed */}
       <div className="flex-1 max-w-md mx-4 overflow-hidden text-center">
-        {events.length > 0 && (
+        {lastError ? (
+          <span className="flex items-center justify-center gap-2 font-mono text-[11px] text-crit truncate">
+            <span>{lastError}</span>
+            <button onClick={() => setError(null)} aria-label="Dismiss error">
+              <X className="w-3 h-3" />
+            </button>
+          </span>
+        ) : events.length > 0 ? (
           <span className="font-mono text-[11px] text-teal-bright animate-pulse truncate block">
             [{events[events.length - 1].kind.toUpperCase()}] {events[events.length - 1].msg}
           </span>
-        )}
+        ) : null}
       </div>
 
       {/* System Status & FPS */}

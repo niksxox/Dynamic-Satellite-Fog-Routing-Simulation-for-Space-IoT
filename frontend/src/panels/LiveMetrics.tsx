@@ -65,7 +65,7 @@ export const LiveMetrics: React.FC = () => {
           <div className="flex items-center space-x-2">
             <Activity className="w-4 h-4 text-teal-bright" />
             <h2 className="text-xs font-bold uppercase tracking-wider text-text">
-              Live Network Metrics
+              {ui.orbitMode === 'live' ? 'Simulation Metrics' : 'Live Network Metrics'}
             </h2>
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-panel2 text-muted border border-border">
@@ -73,6 +73,11 @@ export const LiveMetrics: React.FC = () => {
           </span>
         </div>
       </div>
+      {ui.orbitMode !== 'simulation' && (
+        <div className="px-4 py-2 text-[10px] text-warn border-b border-border">
+          Routing and performance values are simulated; no operational telemetry is connected.
+        </div>
+      )}
 
       <div className="p-4 space-y-4 flex-1">
         {/* Metric 1: End-to-End Latency */}

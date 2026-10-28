@@ -3,13 +3,15 @@ import { useSimStore } from '../store/useSim';
 import { Play, Pause, RotateCcw, Zap, AlertTriangle, ShieldCheck, RefreshCw, Sliders } from 'lucide-react';
 
 export const Controls: React.FC = () => {
-  const { latestFrame, sendCommand } = useSimStore();
+  const { latestFrame, sendCommand, ui } = useSimStore();
   const [isOpen, setIsOpen] = useState(false);
   const [weights, setWeights] = useState({ a: 1.0, b: 1.0, c: 1.0 });
   const [flowScale, setFlowScale] = useState(1.0);
   const [speed, setSpeed] = useState(20);
 
   const running = latestFrame?.running ?? true;
+
+  if (ui.orbitMode === 'live') return null;
 
   const handleWeightChange = (key: 'a' | 'b' | 'c', val: number) => {
     const next = { ...weights, [key]: val };

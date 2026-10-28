@@ -4,7 +4,7 @@ import { X, AlertTriangle, CheckCircle, Radio, Wifi, Zap } from 'lucide-react';
 import { formatNumber } from '../lib/format';
 
 export const Inspector: React.FC = () => {
-  const { ui, latestFrame, init, setSelection, sendCommand } = useSimStore();
+  const { ui, latestFrame, init, trackingStatus, setSelection, sendCommand } = useSimStore();
   const selection = ui.selection;
 
   if (!selection || !latestFrame) return null;
@@ -13,8 +13,10 @@ export const Inspector: React.FC = () => {
 
   if (selection.type === 'sat') {
     const sat = latestFrame.sats.find((s) => s.id === selection.id);
+    const trackedSat = trackingStatus?.satellites.find((tracked) => tracked.id === selection.id);
     const plane = init?.planes[selection.id] ?? Math.floor(selection.id / 10);
     const isFailed = sat?.st === 1;
+    const isLiveTracking = ui.orbitMode === 'live' && latestFrame.positionSource === 'tle';
 
     return (
       <div className="absolute bottom-6 right-6 w-80 bg-panel/95 backdrop-blur-md rounded-xl border border-border shadow-2xl p-4 z-30 glow-panel text-xs animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -24,8 +26,12 @@ export const Inspector: React.FC = () => {
               <Radio className="w-3.5 h-3.5 text-teal-bright" />
             </div>
             <div>
-              <div className="font-semibold text-text">Satellite S{String(selection.id).padStart(3, '0')}</div>
-              <div className="text-[10px] text-muted font-mono">Plane #{plane}</div>
+              <div className="font-semibold text-text">
+                {trackedSat?.name ?? `Satellite S${String(selection.id).padStart(3, '0')}`}
+              </div>
+              <div className="text-[10px] text-muted font-mono">
+                {trackedSat ? `NORAD ${trackedSat.norad_id}` : `Plane #${plane}`}
+              </div>
             </div>
           </div>
           <button onClick={handleClose} className="text-muted hover:text-text p-1">
@@ -52,13 +58,12 @@ export const Inspector: React.FC = () => {
             <span className="text-muted">Altitude:</span>
             <span className="text-text tabular-nums">{sat?.alt ?? 550} km</span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-muted">Velocity:</span>
-            <span className="text-text tabular-nums">~7.59 km/s</span>
-          </div>
+          {isLiveTracking && (
+            <div className="text-teal-bright">Position estimated from published orbital elements.</div>
+          )}
         </div>
 
-        <div className="flex gap-2">
+        {!isLiveTracking && <div className="flex gap-2">
           {isFailed ? (
             <button
               onClick={() => sendCommand('restore_sat', { id: selection.id })}
@@ -74,7 +79,7 @@ export const Inspector: React.FC = () => {
               Fail Satellite (F)
             </button>
           )}
-        </div>
+        </div>}
       </div>
     );
   }

@@ -35,7 +35,19 @@ interface DragState {
 
 export const MapComponent: React.FC = () => {
   const deckRef = useRef<any>(null);
-  const { latestFrame, init, ui, setSelection, setDragging, sendCommand, setFps } = useSimStore();
+  const {
+    latestFrame,
+    init,
+    trackingStatus,
+    groundTrack,
+    ui,
+    setSelection,
+    setDragging,
+    setGroundTrack,
+    setTrackingError,
+    sendCommand,
+    setFps,
+  } = useSimStore();
 
   const [interpolatedSats, setInterpolatedSats] = useState<InterpolatedSat[]>([]);
   const [dragState, setDragState] = useState<DragState>({
@@ -74,9 +86,58 @@ export const MapComponent: React.FC = () => {
     return () => cancelAnimationFrame(animId);
   }, [setFps]);
 
+  const livePositionsReady = latestFrame?.positionSource === 'tle';
+  const displayLivePositions = ui.orbitMode !== 'simulation' && livePositionsReady;
+  const showSatellites = ui.orbitMode === 'simulation' || displayLivePositions;
+  const showNetwork = ui.orbitMode === 'simulation' || (ui.orbitMode === 'combined' && displayLivePositions);
+  const displayedSats = showSatellites ? interpolatedSats : [];
+
+  useEffect(() => {
+    const selection = ui.selection;
+    if (
+      !displayLivePositions ||
+      selection?.type !== 'sat' ||
+      !trackingStatus?.available ||
+      trackingStatus.satellites[selection.id] === undefined
+    ) {
+      setGroundTrack(null);
+      return;
+    }
+
+    let active = true;
+    const loadGroundTrack = async () => {
+      try {
+        const response = await fetch(`/api/tracking/${selection.id}/ground-track`);
+        if (!response.ok) {
+          throw new Error(`Ground-track request failed (${response.status})`);
+        }
+        const track = await response.json();
+        if (active) {
+          setGroundTrack(track);
+          setTrackingError(null);
+        }
+      } catch (error) {
+        if (active) {
+          setTrackingError(error instanceof Error ? error.message : 'Unable to load ground track');
+        }
+      }
+    };
+
+    void loadGroundTrack();
+    return () => {
+      active = false;
+    };
+  }, [
+    displayLivePositions,
+    trackingStatus,
+    ui.selection,
+    setGroundTrack,
+    setTrackingError,
+  ]);
+
   // Coordinate lookup map
   const satCoordsMap = new Map<number, [number, number]>();
-  for (const s of interpolatedSats) {
+  for (const s of displayedSats) {
     if (dragState.isDragging && dragState.satId === s.id && dragState.dragCoord) {
       satCoordsMap.set(s.id, dragState.dragCoord);
     } else {
@@ -93,12 +154,12 @@ export const MapComponent: React.FC = () => {
 
   const getNodeCoord = useCallback(
     (id: number): [number, number] | null => {
-      if (id >= 120) {
+      if (id >= (init?.nSats ?? 120)) {
         return gsCoordsMap.get(id) ?? null;
       }
       return satCoordsMap.get(id) ?? null;
     },
-    [satCoordsMap, gsCoordsMap]
+    [satCoordsMap, gsCoordsMap, init?.nSats]
   );
 
   // Keyboard shortcut listeners (Space = pause/play, Esc = clear selection, F = fail item)
@@ -106,13 +167,13 @@ export const MapComponent: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      if (e.code === 'Space') {
+      if (e.code === 'Space' && useSimStore.getState().ui.orbitMode === 'simulation') {
         e.preventDefault();
         const frame = useSimStore.getState().latestFrame;
         sendCommand(frame?.running ? 'pause' : 'play');
       } else if (e.code === 'Escape') {
         setSelection(null);
-      } else if (e.code === 'KeyF') {
+      } else if (e.code === 'KeyF' && useSimStore.getState().ui.orbitMode === 'simulation') {
         const sel = useSimStore.getState().ui.selection;
         if (sel?.type === 'link') {
           sendCommand('fail_link', { a: sel.a, b: sel.b });
@@ -128,7 +189,12 @@ export const MapComponent: React.FC = () => {
 
   // Dragging handlers per SPEC §13
   const handlePointerDown = (info: any, event: any) => {
-    if (info && info.object && info.layer?.id === 'satellites') {
+    if (
+      ui.orbitMode === 'simulation' &&
+      info &&
+      info.object &&
+      info.layer?.id === 'satellites'
+    ) {
       const sat = info.object as InterpolatedSat;
       setDragState({
         isDragging: true,
@@ -209,7 +275,7 @@ export const MapComponent: React.FC = () => {
   );
 
   // 2. ISL & GSL Links (Split across antimeridian)
-  if (latestFrame?.links) {
+  if (showNetwork && latestFrame?.links) {
     const linkSegments: any[] = [];
 
     for (const link of latestFrame.links) {
@@ -263,7 +329,7 @@ export const MapComponent: React.FC = () => {
   }
 
   // 3. Selected Flow Paths (Adaptive: teal solid; Static: orange dashed)
-  if (latestFrame?.flows && ui.selectedFlowId) {
+  if (showNetwork && latestFrame?.flows && ui.selectedFlowId) {
     const currentFlow = latestFrame.flows.find((f) => f.id === ui.selectedFlowId);
     if (currentFlow) {
       // Static Path Overlay
@@ -339,6 +405,24 @@ export const MapComponent: React.FC = () => {
     }
   }
 
+  if (
+    groundTrack &&
+    groundTrack.satellite_id === (ui.selection?.type === 'sat' ? ui.selection.id : -1)
+  ) {
+    layers.push(
+      new PathLayer({
+        id: 'tle-ground-track',
+        data: [groundTrack],
+        getPath: (track: NonNullable<typeof groundTrack>) => track.track,
+        getColor: [245, 185, 66, 220],
+        getWidth: 2,
+        widthMinPixels: 2,
+        wrapLongitude: true,
+        pickable: false,
+      })
+    );
+  }
+
   // 4. Ground Stations (Scatterplot + TextLayer)
   if (init?.ground) {
     layers.push(
@@ -379,7 +463,7 @@ export const MapComponent: React.FC = () => {
   layers.push(
     new ScatterplotLayer({
       id: 'satellites-halo',
-      data: interpolatedSats,
+      data: displayedSats,
       getPosition: (d: InterpolatedSat) => {
         if (dragState.isDragging && dragState.satId === d.id && dragState.dragCoord) {
           return [dragState.dragCoord[0], dragState.dragCoord[1]];
@@ -393,7 +477,7 @@ export const MapComponent: React.FC = () => {
       radiusMaxPixels: 12,
       pickable: false,
       updateTriggers: {
-        getPosition: [interpolatedSats, dragState.dragCoord],
+        getPosition: [displayedSats, dragState.dragCoord],
       },
     })
   );
@@ -401,7 +485,7 @@ export const MapComponent: React.FC = () => {
   layers.push(
     new ScatterplotLayer({
       id: 'satellites',
-      data: interpolatedSats,
+      data: displayedSats,
       getPosition: (d: InterpolatedSat) => {
         if (dragState.isDragging && dragState.satId === d.id && dragState.dragCoord) {
           return [dragState.dragCoord[0], dragState.dragCoord[1]];
@@ -422,7 +506,7 @@ export const MapComponent: React.FC = () => {
         }
       },
       updateTriggers: {
-        getPosition: [interpolatedSats, dragState.dragCoord],
+        getPosition: [displayedSats, dragState.dragCoord],
       },
     })
   );

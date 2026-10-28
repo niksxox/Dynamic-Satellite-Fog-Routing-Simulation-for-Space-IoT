@@ -1,10 +1,12 @@
+import { ClientCommand, ServerMessage } from './types';
+
 export class ReconnectingWebSocket {
   private url: string;
   private ws: WebSocket | null = null;
   private reconnectDelay = 500;
   private maxReconnectDelay = 5000;
   private shouldReconnect = true;
-  private messageListeners: ((data: any) => void)[] = [];
+  private messageListeners: ((data: ServerMessage) => void)[] = [];
   private statusListeners: ((connected: boolean) => void)[] = [];
 
   constructor(url?: string) {
@@ -25,7 +27,7 @@ export class ReconnectingWebSocket {
 
       this.ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(event.data) as ServerMessage;
           this.messageListeners.forEach((fn) => fn(data));
         } catch (err) {
           console.error('[WS] Failed to parse message', err);
@@ -52,7 +54,7 @@ export class ReconnectingWebSocket {
     }
   }
 
-  public onMessage(fn: (data: any) => void) {
+  public onMessage(fn: (data: ServerMessage) => void) {
     this.messageListeners.push(fn);
     return () => {
       this.messageListeners = this.messageListeners.filter((l) => l !== fn);
@@ -70,7 +72,7 @@ export class ReconnectingWebSocket {
     this.statusListeners.forEach((fn) => fn(connected));
   }
 
-  public send(cmd: any) {
+  public send(cmd: ClientCommand) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(cmd));
     } else {
