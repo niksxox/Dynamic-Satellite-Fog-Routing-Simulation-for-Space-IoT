@@ -1,174 +1,26 @@
-# Dynamic Satellite-Fog Routing Simulation for Space-IoT
+# SatRoute — Intelligent Routing for Dynamic Satellite Networks
 
-Research simulation of packets routed through a changing graph of IoT devices, LEO satellites, ground stations, fog nodes, and a cloud destination. It is a software model, not a satellite-control system.
+A live, interactive LEO constellation simulator where you can watch data routed across moving satellites, break things (links, satellites, whole regions, weather), drag satellites around, and watch an **Adaptive cost-aware router** beat a **Static shortest-path baseline** with real, measured numbers.
 
-## Implemented phases
+## Quick Start (3 Commands)
 
-### Phase 1: models and topology
+```bash
+# 1. Setup Python virtual environment & backend dependencies
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r backend/requirements.txt
 
-Typed node, link, packet, and configuration models; a NetworkX topology engine; configured physical link ranges; explicit node and link availability; and deterministic circular satellite movement in a Cartesian XY projection. The orbital projection is a simple, replaceable approximation, not validated orbital mechanics.
+# 2. Install frontend dependencies
+cd frontend && npm install && cd ..
 
-Supported link pairs: satellite-satellite, satellite-ground station, ground station-fog, IoT-ground station, IoT-satellite, and fog-cloud. Link distances use kilometers, propagation latency uses milliseconds, bandwidth uses decimal Mbps, and packet size uses bytes.
-
-### Phase 2: routing
-
-`src/routing/engine.py` provides two Dijkstra modes:
-
-- `shortest_latency`: propagation plus explicit overhead and, when a packet size is supplied, size-dependent serialization latency.
-- `multi_factor`: nonnegative weighted cost from normalized latency, bandwidth penalty, packet loss, and congestion. The cost is dimensionless and separate from estimated physical latency.
-
-Only operational nodes and links can be routed. `RoutingResult` includes path, cost, estimated latency, bottleneck bandwidth, estimated reliability, availability, and a no-route reason. Reliability multiplies per-link success probabilities and assumes independent losses.
-
-### Phase 3: SimPy simulation and rerouting
-
-`SimulationEngine` runs headlessly with one SimPy virtual-time environment. It coordinates topology refresh, Poisson or scheduled traffic, hop-by-hop forwarding, link/node failures and recovery, fog service, route decisions, structured events, and metrics.
-
-Traffic uses exponential inter-arrival times for a Poisson process unless a deterministic `schedule_s` tuple is supplied. Each source receives a separate seeded random stream. Packet IDs are deterministic within a run.
-
-The default link model is full duplex: each direction has an independent capacity-one serialization resource. `half_duplex_links: true` makes opposite directions share the resource. Serialization time is `packet_size_bytes * 8 / (bandwidth_mbps * 1,000,000)` seconds. The channel resource is held for serialization and configured overhead; propagation is in flight and may overlap other transmissions.
-
-An already-started frame completes its serialization and propagation if its link fails. A packet waiting for the link checks availability after acquiring the resource. At the next forwarding decision, an unavailable hop triggers a route computation from the packet's current node. Route computation has a configurable simulated delay (`route_computation_delay_ms`); a reroute count increments only when a valid replacement route is selected. If a recovery attempt exhausts its configured retries, the packet is dropped. Initial no-route attempts wait for a topology interval and are bounded by the same retry setting.
-
-Fog nodes use a shared SimPy resource with `fog_default_servers` capacity. Service time is the larger of configured `processing_delay_ms` and `1 / processing_capacity_pps` when a processing rate is configured. Queue wait is measured from the actual resource request and reported separately. Route estimates do not include fog service delay, so measured end-to-end delay counts it only when the packet is processed.
-
-Packets end as delivered, dropped, timed out, or `PENDING`. `PENDING` is a right-censored packet still active at the simulation horizon; it is not counted as a delivery or assigned a latency. PDR is delivered/generated, including pending packets in the denominator. Goodput is delivered payload bits divided by the full simulation observation window. Recovery time is route-selection time minus failure-detection time; failed recoveries have a separate count and no zero duration.
-
-Delivered-packet latency includes mean and median for any nonempty sample. The p95 field is left undefined until there are at least 20 delivered samples.
-
-In-memory packet and event records are capped by `max_generated_packets` and `max_event_records` in the config. The result indicates if the event cap truncated the log. Packet records are retained up to the packet cap.
-
-## Setup and commands
-
-Requires Python 3.11 or newer. Create a virtual environment and install the pinned stack:
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+# 3. Start both Backend & Frontend
+./scripts/dev.sh
 ```
 
-Run the deterministic two-satellite failure/recovery example from the repository root:
+- **Frontend App**: [http://localhost:5173](http://localhost:5173)
+- **Backend API & Health**: [http://localhost:8000/health](http://localhost:8000/health)
+- **WebSocket Endpoint**: `ws://localhost:8000/ws`
 
-```powershell
-python -m scripts.run_simulation --seed 7 --duration 0.2
-```
-
-Run all tests:
-
-```powershell
-python -m pytest -q
-```
-
-## Deploy on Render
-
-The repository includes a Render Blueprint for the existing Streamlit dashboard. To deploy:
-
-1. Push the `deploy/render` branch to GitHub.
-2. In Render, choose **New → Blueprint**, connect `niksxox/Dynamic-Satellite-Fog-Routing-Simulation-for-Space-IoT`, and select the `deploy/render` branch.
-3. Review the `satellite-fog-routing-dashboard` web service and apply the Blueprint.
-4. Open the Render URL after the service's `/_stcore/health` check passes.
-
-The free web service can sleep while idle and take longer to start on its next visit. This project does not require a database for a demo; choose local session storage in the dashboard. Local session data is in memory and is not durable across service restarts. For persistent run history, provision PostgreSQL separately and configure `DATABASE_URL` as a secret environment variable in Render; do not commit database credentials to the repository.
-
-Phase 3 verification in the implementation environment: `python -m pytest -q` completed with **40 passed**. The documented demo command completed with 3 generated, 3 delivered, 0 dropped, and 1 reroute; measured mean latency was 0.0066039 s and route recovery time was 0.001 s. These are demonstration-run observations, not an algorithm comparison or performance claim.
-
-The runnable API is `SimulationEngine(config, nodes, traffic, failures=...).run()`. Structured packet records, events, decisions, topology/resource statistics, and metric summaries are returned in `SimulationResults`. `FailureSchedule` supports link/node failure and recovery, fog overload/recovery, congestion changes, and packet-loss changes.
-
-### Phase 4: PostgreSQL persistence
-
-Install the pinned requirements, then create a PostgreSQL database and set `DATABASE_URL`. `.env.example` shows the format; copy it to `.env` and replace the placeholders (the project does not automatically load `.env`, so export the variable in your shell or IDE).
-
-```sql
-CREATE DATABASE satellite_sim;
-```
-
-Initialize missing tables without removing run history, then run with persistence:
-
-```powershell
-python -m scripts.init_db
-python -m scripts.run_simulation --seed 7 --duration 0.2 --storage postgres
-```
-
-`--storage auto` uses PostgreSQL when `DATABASE_URL` is set and otherwise uses the clearly reported volatile `in_memory_demo` backend. Use `--storage memory` to select it explicitly. In-memory data is lost when the process exits. Persistence writes use a separate initial configuration transaction and one final bounded batch transaction; the run is completed only after the latter commits. A failed final write leaves the run non-completed and surfaces the error. Events and route decisions are append-only per run; the links table stores configured/current edge attributes, not historical topology by itself. Virtual time is seconds from simulation start; wall-clock audit timestamps are timezone aware. Node/packet/route references are scoped by run; run IDs are unique globally.
-
-The schema is version-controlled in `src/database/models.py` and records version 1 in `schema_version`. Initialization is additive and never deletes historical records. Future schema evolution should add an explicit versioned migration before changing an existing deployment.
-
-Repository methods `list_runs()`, `get_run_summary(run_id)`, `get_route_history(run_id, packet_id)`, `get_event_timeline(run_id)`, and `get_metrics(run_id)` support historical review. Packet outcome counts use generated packets as the eligible population; pending packets are right-censored and remain in the PDR denominator as specified by Phase 3. Mean/median latency use delivered packets only; undefined latency/PDR values are stored as `NULL`. Throughput is delivered payload bits divided by the full observation window. Config snapshots make scenario differences visible; comparisons should use compatible configurations and seeds.
-
-For example, query final outcomes and latency from delivered packets, plus reroute and successful recovery event counts:
-
-```sql
-SELECT r.run_id, r.routing_algorithm, r.random_seed,
-       m.generated, m.delivered, m.dropped, m.timed_out, m.pending, m.pdr,
-       (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY p.latency_s)
-          FROM packets p WHERE p.run_id = r.run_id AND p.final_state = 'delivered') AS median_latency_s,
-       (SELECT count(*) FROM routes rt WHERE rt.run_id = r.run_id AND rt.cause NOT IN ('initial', 'retry')) AS route_changes,
-       (SELECT count(*) FROM simulation_events e WHERE e.run_id = r.run_id
-          AND e.event_type IN ('link_recovery', 'node_recovery', 'fog_recovery')) AS recovery_events
-FROM simulation_runs r
-LEFT JOIN metric_snapshots m ON m.run_id = r.run_id AND m.timestamp_s = r.simulation_end_s
-WHERE r.status = 'completed';
-```
-
-Use the same seed and configuration JSON when comparing routing algorithms; inspect those snapshots and exclude incompatible scenarios. Export with `psql` `\copy (...) TO 'runs.csv' CSV HEADER` or serialize results returned by the repository methods.
-
-To run the PostgreSQL integration test, provision an isolated database whose name contains `test` and set `TEST_DATABASE_URL`. Without that dedicated database the integration test is explicitly skipped. SQLite is used only by unit tests to exercise ORM/repository transactions; it is not a supported runtime backend. Export queried data with PostgreSQL `COPY`/`psql` or the repository APIs. Common connection errors usually mean the server is stopped, the database name/user/password is wrong, or the host/port is unreachable. Never commit real credentials or `.env` files.
-
-### Phase 5: reproducible algorithm experiments
-
-The research question is whether `multi_factor` routing changes measured packet outcomes versus the `shortest_latency` Dijkstra baseline under matched network conditions. The framework does not assume the weighted algorithm wins. Both are existing Dijkstra routers; only their route cost differs. Each paired seed reconstructs the same topology, traffic parameters, duration, mobility, failure schedule, resource settings, and seed for each algorithm. Traffic uses per-source seeded streams. Packet-loss draws are now deterministic by seed, packet, link, and per-packet link-attempt index, so a route using another link cannot shift unrelated random draws. Different paths may still create different contention and outcomes.
-
-The scenario registry includes stable topology, normal satellite mobility, inter-satellite link failure, satellite node failure, congestion spike, fog-node overload, high traffic load, simultaneous failures, and the two Phase 7 orbital scenarios. Earlier scenarios preserve the existing compatibility and range model; the deterministic legacy circular orbit remains a simplified projection. Failure events are checked in the emitted simulation event log and recorded per run. Durations, satellite count, traffic intensity, and seeds are configurable.
-
-Run a quick paired experiment (3 seeds, both algorithms) and export results:
-
-```powershell
-python -m scripts.run_experiment --scenario stable_topology --seeds 3 --seed-start 7 --duration 2 --satellites 3 --traffic-intensity 10 --storage local --output-dir experiment_output
-```
-
-Choose any scenario with `--scenario`; choose `--algorithm shortest_latency` or `--algorithm multi_factor` for one algorithm; change the seed count/start, duration, satellite count, traffic rate, and output directory with the corresponding options. Local mode writes explicitly labeled JSON, per-run CSV, aggregated CSV, paired-difference CSV, Markdown, and Plotly HTML charts. It does not persist simulation records to PostgreSQL. Use `--storage postgres` with configured `DATABASE_URL` to initialize the additive schema and persist both simulations and experiment records.
-
-Latency statistics use delivered packets only; measured packet latency includes transmission serialization, configured overhead, propagation, queueing/service at fog, route-computation delay, and rerouting delay. PDR is delivered/generated; pending packets are censored at the fixed full-duration observation window and remain in the denominator. Effective throughput is delivered payload bits per full observation window, in decimal Mbps. Recovery includes only successful detection-to-valid-route samples; failed recoveries have a count but no zero duration. Packet-loss rate is lost frames divided by transmission attempts. Drop and timeout rates use generated packets. Per-run wall-clock runtime is reported separately from network metrics. Route-computation CPU time and time-integrated link availability are currently unavailable. The report gives valid sample counts, failures, variability, and exploratory paired t intervals; small samples do not establish statistical significance. Failed runs remain in exports and aggregates.
-
-The generated actual demonstration run is in `experiment_output/exp-f8a13bdd78b74a93a956d6915ad11ad4_report.md` and its JSON/CSV/HTML outputs. For 3 seeds on the 2-second stable scenario (3 satellites, 10 packets/s base intensity), both algorithms completed all 3 runs: mean delivered latency **4.1773 ms**, PDR **1.0**, and effective throughput **0.048469 Mbps** for each. In this stable case the measured means match; this is not evidence of a general advantage. A one-seed smoke experiment also ran both algorithms across all eight scenarios; all 16 runs completed and each scheduled failure scenario recorded its expected failure/change event.
-
-Charts are made only from actual completed run metrics. This command evaluates one traffic intensity and one network size at a time; cross-intensity and cross-size sweep charts are not generated from a single experiment. Repeat with different settings and combine exports for such analyses. Per-run results are held in memory until export; do not request very large sweeps in one process.
-
-### Phase 6: interactive dashboard
-
-Install the pinned requirements and launch the Streamlit app from the repository root:
-
-```powershell
-python -m pip install -r requirements.txt
-python -m streamlit run app.py
-```
-
-The sidebar selects Overview, Network Explorer, Simulation Lab, Performance Analytics, Failure Replay, or Experiment History, and separately selects **Local session** or **PostgreSQL** storage. The lab calls the real scenario builders and `SimulationEngine`; paired runs call `ExperimentRunner`. It exposes seed, virtual duration, satellite count, traffic intensity, scenario, and routing mode. Local run traces are temporary to the Streamlit process/session; local experiment records can be reloaded from `experiment_output/`. PostgreSQL mode needs a reachable database configured through `DATABASE_URL`; it initializes missing tables additively and uses the persistence repository. Missing configuration or connection errors are shown without displaying credentials.
-
-The explorer draws nodes and links from captured simulation/database configuration and can highlight an actual packet path. Failure Replay orders emitted events by virtual time, highlights the affected resource, and displays packet route decisions. Analytics uses saved experiment rows and the existing aggregation/paired-difference methods, filters compatible completed pairs, reports failed runs and sample counts, and leaves undefined metrics blank. Experiment History can download JSON and per-run CSV and retrieve persisted packet/route history when PostgreSQL was used.
-
-The simulator does not store periodic full-scene snapshots. For local physical runs, Network Explorer can recompute orbital geometry at a selected virtual time from orbital inputs and recorded failures; legacy and persisted runs show captured topology and event/path records. Local experiment exports retain metrics/configuration, while full packet traces are session-only unless PostgreSQL persistence is enabled. For tests, run `python -m pytest -q`; the Streamlit startup and lab flow are covered by `AppTest`.
-
-## Phase 7: two-body orbital geometry and changing visibility
-
-New `orbital_visibility_demo` and `orbital_motion_with_link_failure` scenarios opt into `circular_two_body`. Older scenarios and saved configuration snapshots without an `orbital_model` continue to use `legacy_xy`, preserving their historical topology. No previous experiment output was regenerated or relabeled.
-
-Circular propagation uses kilometres, seconds, and radians. For semi-major axis `a`, gravitational parameter `mu`, epoch `t0`, and argument of latitude `u0`, mean motion is `n = sqrt(mu / a^3)` and propagated phase is `u(t) = u0 + n(t - t0)`. The orbital-plane state `(a cos u, a sin u, 0)` is rotated by `R3(RAAN) R1(inclination)` into ECI. Defaults use `mu = 398600.4418 km^3/s^2`, a 6378.137 km WGS-84 equatorial radius, and WGS-84 flattening. This is a deterministic circular two-body approximation; it does not include J2, drag, third-body forces, attitude, antenna patterns, or precision ephemerides.
-
-Ground stations and other terrestrial nodes can use geodetic latitude/longitude in degrees and altitude in metres. They are converted to WGS-84 ECEF. Satellite positions are ECI; ECEF coordinates are rotated into ECI for distance and line-of-sight checks. Earth rotation uses the IAU Earth Rotation Angle with the simplification UT1=UTC, keyed to the configurable Unix reference epoch (`946728000`, J2000). Polar motion and precession/nutation are omitted. Frame-tagged Cartesian distances reject mismatched known frames. Geometry uses a 1-metre tolerance for range and ellipsoid-tangency floating point boundaries. Satellite links require range and ellipsoid line of sight. Satellite-to-ground/IoT links additionally require the configured minimum elevation; unsupported node-type pairs remain disallowed. Propagation latency continues to use the existing distance-over-light-speed model.
-
-The example defaults in `config/default.yaml` select `circular_two_body`; code-created legacy configs keep the `legacy_xy` compatibility default when the new field is missing. The dashboard labels both models and exposes altitude, inclination, RAAN, argument of latitude, station geodetic coordinates, and elevation threshold. For locally held physical runs, Network Explorer can recompute the 2D ECI X/Y projection and eligible links at a selected virtual timestamp, replaying recorded link/node failure and recovery events. This is a geometry view, not a validated orbital prediction or full 3D globe.
-
-Run the deterministic motion-only demo or combine motion with a scheduled ISL outage:
-
-```powershell
-python -m scripts.run_experiment --scenario orbital_visibility_demo --seeds 1 --duration 600 --satellites 3 --traffic-intensity 1 --storage local --output-dir experiment_output
-python -m scripts.run_experiment --scenario orbital_motion_with_link_failure --seeds 1 --duration 600 --satellites 3 --traffic-intensity 1 --storage local --output-dir experiment_output
-python -m pytest -q
-```
-
-Experiment row metadata records the orbital model, per-satellite orbital elements, coordinate frame and rotation convention, Earth constants, elevation threshold, ranges, topology update interval, seed, and scenario configuration. The complete model still has simplified traffic, channel, propagation, antenna, and constellation assumptions; enabling orbital geometry does not make the entire network realistic. At Phase 7 implementation, the full test suite result was **80 passed, 1 skipped** (the PostgreSQL integration test requires its dedicated test database).
-
-## Model limitations and remaining phases
-
-The `legacy_xy` compatibility mode remains a deterministic circular projection, not orbital or geographic geometry. Physical mode is still only a circular two-body demonstration and omits perturbations, while the graph updates at configured intervals. Shared link resources limit serialization but do not model a lower-layer retransmission protocol. Packet loss drops the packet without retransmission. Fog overload currently marks the fog node unavailable; it does not dynamically reduce its service rate. Multi-factor weights normalize against the current usable edge set, so route costs are relative to that snapshot. Phase 3 does not emit periodic queue-length or utilization snapshots, so persisted full-scene historical reconstruction is unavailable.
+## Architecture & Plans
+- [docs/SPEC.md](docs/SPEC.md) — Technical Specification & Contract
+- [docs/PROTOTYPE_PLAN.md](docs/PROTOTYPE_PLAN.md) — Prototype Implementation Plan (P0–P8)
+- [docs/MVP_PLAN.md](docs/MVP_PLAN.md) — MVP Implementation Plan (M0–M14)

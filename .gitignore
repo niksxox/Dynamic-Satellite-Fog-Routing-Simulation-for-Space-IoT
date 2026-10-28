@@ -1,16 +1,8 @@
-# Python
+node_modules/
+dist/
+.venv/
 __pycache__/
 *.pyc
-.pytest_cache/
-.venv/
-venv/
-
-# Node
-node_modules/
-frontend/dist/
-frontend/node_modules/
-
-# Misc
 .DS_Store
-*.pptx
-" filePath="C:\Users\DELL\Desktop\Dynamic-Satellite-Fog-Routing-Simulation-for-Space-IoT\.gitignore
+.env
+.env.local

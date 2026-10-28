@@ -1,0 +1,78 @@
+{
+  "type": "frame",
+  "t": 10.5,
+  "scale": 20.0,
+  "running": true,
+  "tickMs": 42.1,
+  "sats": [
+    { "id": 0, "lat": 12.34, "lon": 45.67, "alt": 550.0, "vlat": 0.05, "vlon": 0.08, "st": 0 },
+    { "id": 1, "lat": 22.34, "lon": 55.67, "alt": 550.0, "vlat": 0.04, "vlon": 0.07, "st": 0 },
+    { "id": 2, "lat": -32.34, "lon": 65.67, "alt": 550.0, "vlat": -0.05, "vlon": 0.06, "st": 1 }
+  ],
+  "links": [
+    { "a": 0, "b": 1, "k": 0, "up": 1, "rho": 0.35, "ms": 12.4, "loss": 0.001 },
+    { "a": 1, "b": 2, "k": 0, "up": 0, "rho": 0.0, "ms": 18.2, "loss": 1.0 },
+    { "a": 0, "b": 120, "k": 1, "up": 1, "rho": 0.62, "ms": 4.1, "loss": 0.001 },
+    { "a": 1, "b": 121, "k": 1, "up": 1, "rho": 0.44, "ms": 5.2, "loss": 0.001 }
+  ],
+  "flows": [
+    {
+      "id": "DEL->LON",
+      "adaptive": {
+        "paths": [{ "nodes": [120, 0, 1, 121], "mbps": 600.0 }],
+        "ms": 21.7,
+        "pdr": 0.999,
+        "blackholed": false
+      },
+      "static": {
+        "paths": [{ "nodes": [120, 0, 1, 2, 121], "mbps": 600.0 }],
+        "ms": 30.6,
+        "pdr": 0.0,
+        "blackholed": true
+      }
+    },
+    {
+      "id": "NYC->SIN",
+      "adaptive": {
+        "paths": [{ "nodes": [122, 1, 0, 123], "mbps": 500.0 }],
+        "ms": 16.5,
+        "pdr": 0.998,
+        "blackholed": false
+      },
+      "static": {
+        "paths": [{ "nodes": [122, 1, 0, 123], "mbps": 500.0 }],
+        "ms": 16.5,
+        "pdr": 0.998,
+        "blackholed": false
+      }
+    }
+  ],
+  "metrics": {
+    "adaptive": {
+      "latMs": 19.1,
+      "pdr": 0.9985,
+      "thrMbps": 1100.0,
+      "reroutes": 2,
+      "rerouteRate": 0.4,
+      "recoverS": 1.8
+    },
+    "static": {
+      "latMs": 30.6,
+      "pdr": 0.454,
+      "thrMbps": 500.0,
+      "reroutes": 0,
+      "rerouteRate": 0.0,
+      "recoverS": 0.0
+    },
+    "linkUptime": 0.985,
+    "activeFailures": 1
+  },
+  "events": [
+    {
+      "t": 10.0,
+      "level": "warn",
+      "kind": "link_fail",
+      "msg": "Link S001-S002 failed"
+    }
+  ]
+}
